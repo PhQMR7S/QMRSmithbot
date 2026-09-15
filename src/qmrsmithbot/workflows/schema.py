@@ -40,7 +40,7 @@ class WorkflowDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: int = Field(default=1, ge=1)
-    nodes: list[WorkflowNode] = Field(default_factory=list, max_length=500)
+    nodes: list[WorkflowNode] = Field(min_length=1, max_length=500)
     edges: list[WorkflowEdge] = Field(default_factory=list, max_length=1000)
     variables: dict[str, Any] = Field(default_factory=dict)
 
@@ -49,10 +49,17 @@ class WorkflowDefinition(BaseModel):
         ids = [node.id for node in self.nodes]
         if len(ids) != len(set(ids)):
             raise ValueError("workflow node ids must be unique")
+
         known = set(ids)
+        seen_edges: set[tuple[str, str, str | None]] = set()
         for edge in self.edges:
             if edge.source not in known or edge.target not in known:
                 raise ValueError("workflow edges must reference existing nodes")
-        if self.nodes and not any(node.type.startswith("trigger.") for node in self.nodes):
+            edge_key = (edge.source, edge.target, edge.condition)
+            if edge_key in seen_edges:
+                raise ValueError("workflow edges must be unique")
+            seen_edges.add(edge_key)
+
+        if not any(node.type.startswith("trigger.") for node in self.nodes):
             raise ValueError("workflow must contain at least one trigger node")
         return self
