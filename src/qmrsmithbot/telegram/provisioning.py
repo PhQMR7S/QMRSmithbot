@@ -9,6 +9,7 @@ from uuid import UUID
 from aiogram import Bot
 from cryptography.fernet import Fernet
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmrsmithbot.auth.authorization import AuthorizationService
@@ -78,14 +79,9 @@ class TelegramBotProvisioningService:
         token = raw_bot_token.strip()
         if not token or len(token) > 512:
             raise TelegramBotTokenInvalid("invalid Telegram bot token")
-        project = await self.session.scalar(
-            select(BotProjectRecord)
-            .where(BotProjectRecord.id == project_id, BotProjectRecord.tenant_id == tenant_id)
-            .with_for_update()
-        )
-        if project is None:
-            raise TelegramBotNotFound("project was not found")
 
+        # Do not hold the project row lock while making a network request to Telegram.
+        await self.session.rollback()
         try:
             bot = Bot(token=token)
             me = await bot.get_me()
@@ -95,13 +91,19 @@ class TelegramBotProvisioningService:
             if "bot" in locals():
                 await bot.session.close()
 
-        assigned = await self.session.scalar(
+        project = await self.session.scalar(
             select(BotProjectRecord)
-            .where(
+            .where(BotProjectRecord.id == project_id, BotProjectRecord.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        if project is None:
+            raise TelegramBotNotFound("project was not found")
+
+        assigned = await self.session.scalar(
+            select(BotProjectRecord).where(
                 BotProjectRecord.telegram_bot_id == me.id,
                 BotProjectRecord.id != project_id,
             )
-            .with_for_update()
         )
         if assigned is not None:
             raise TelegramBotAlreadyAssigned("Telegram bot is already assigned to another project")
@@ -131,7 +133,15 @@ class TelegramBotProvisioningService:
 
         project.telegram_bot_id = me.id
         project.telegram_username = me.username
-        await self.session.flush()
+        try:
+            async with self.session.begin_nested():
+                await self.session.flush()
+        except IntegrityError as exc:
+            if "telegram_bot_id" in str(exc.orig):
+                raise TelegramBotAlreadyAssigned(
+                    "Telegram bot is already assigned to another project"
+                ) from exc
+            raise
         return ProvisionedBot(
             project_id=project_id,
             telegram_bot_id=me.id,
