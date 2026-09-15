@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -162,7 +163,17 @@ async def list_sessions(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[SessionInfoResponse]:
     sessions = await SessionAdministrationService(session).list_active(principal.user_id)
-    return [SessionInfoResponse(**item.__dict__) for item in sessions]
+    return [
+        SessionInfoResponse(
+            id=item.id,
+            created_at=item.created_at,
+            last_seen_at=item.last_seen_at,
+            expires_at=item.expires_at,
+            user_agent=item.user_agent,
+            ip_address=item.ip_address,
+        )
+        for item in sessions
+    ]
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -172,8 +183,6 @@ async def revoke_session(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     try:
-        from uuid import UUID
-
         parsed_session_id = UUID(session_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="session_id must be a valid UUID") from exc
