@@ -68,12 +68,13 @@ class TelegramRuntimeWorker:
         else:
             async with SessionFactory() as session:
                 async with session.begin():
-                    completed = await TelegramUpdateQueue(session).complete(
+                    # A lease may legitimately expire while a slow handler is finishing.
+                    # Losing the lease is not a worker-fatal condition: another consumer
+                    # owns the row now, and its completion/failure must remain authoritative.
+                    await TelegramUpdateQueue(session).complete(
                         update_id=item.id,
                         claim_token=item.claim_token,
                     )
-                    if not completed:
-                        raise RuntimeError("Telegram update lease was lost before completion")
         return True
 
     async def run_forever(self) -> None:
