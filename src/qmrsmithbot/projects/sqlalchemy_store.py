@@ -8,8 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmrsmithbot.db.models import BotProjectRecord, WorkflowVersionRecord
 from qmrsmithbot.domain.models import BotProject as Project
-from qmrsmithbot.domain.models import BotStatus
-from qmrsmithbot.domain.models import WorkflowVersion
+from qmrsmithbot.domain.models import BotStatus, WorkflowVersion
 from qmrsmithbot.projects.service import ProjectStore
 
 
