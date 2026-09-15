@@ -4,8 +4,8 @@ Revision ID: 0004_production_identity_tenant_admin
 Revises: 0003_identity_tenant_security
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "0004_production_identity_tenant_admin"
@@ -17,7 +17,8 @@ depends_on = None
 def upgrade() -> None:
     op.add_column("identities", sa.Column("email", sa.String(length=320), nullable=True))
     op.add_column(
-        "identities", sa.Column("email_verified", sa.Boolean(), server_default=sa.false(), nullable=False)
+        "identities",
+        sa.Column("email_verified", sa.Boolean(), server_default=sa.false(), nullable=False),
     )
     op.create_index("ix_identities_email", "identities", ["email"], unique=False)
 
