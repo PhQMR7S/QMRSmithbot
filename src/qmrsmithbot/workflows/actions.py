@@ -109,7 +109,7 @@ class ActionEngine:
                 handler.execute(node=node, context=context, attempt=attempt),
                 timeout=timeout,
             )
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             raise ActionExecutionError(
                 f"action timed out: {node.id}", kind=ActionFailureKind.RETRYABLE
             ) from exc
