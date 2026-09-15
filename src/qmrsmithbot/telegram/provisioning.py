@@ -11,8 +11,8 @@ from cryptography.fernet import Fernet
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from qmrsmithbot.auth.models import Permission
 from qmrsmithbot.auth.authorization import AuthorizationService
+from qmrsmithbot.auth.models import Permission
 from qmrsmithbot.config import settings
 from qmrsmithbot.db.models import BotCredentialRecord, BotProjectRecord
 
@@ -26,6 +26,10 @@ class TelegramBotTokenInvalid(TelegramProvisioningError):
 
 
 class TelegramBotNotFound(TelegramProvisioningError):
+    pass
+
+
+class TelegramBotAlreadyAssigned(TelegramProvisioningError):
     pass
 
 
@@ -75,10 +79,9 @@ class TelegramBotProvisioningService:
         if not token or len(token) > 512:
             raise TelegramBotTokenInvalid("invalid Telegram bot token")
         project = await self.session.scalar(
-            select(BotProjectRecord).where(
-                BotProjectRecord.id == project_id,
-                BotProjectRecord.tenant_id == tenant_id,
-            )
+            select(BotProjectRecord)
+            .where(BotProjectRecord.id == project_id, BotProjectRecord.tenant_id == tenant_id)
+            .with_for_update()
         )
         if project is None:
             raise TelegramBotNotFound("project was not found")
@@ -92,26 +95,38 @@ class TelegramBotProvisioningService:
             if "bot" in locals():
                 await bot.session.close()
 
+        assigned = await self.session.scalar(
+            select(BotProjectRecord)
+            .where(
+                BotProjectRecord.telegram_bot_id == me.id,
+                BotProjectRecord.id != project_id,
+            )
+            .with_for_update()
+        )
+        if assigned is not None:
+            raise TelegramBotAlreadyAssigned("Telegram bot is already assigned to another project")
+
         credential = await self.session.scalar(
-            select(BotCredentialRecord).where(BotCredentialRecord.project_id == project_id)
+            select(BotCredentialRecord)
+            .where(BotCredentialRecord.project_id == project_id)
+            .with_for_update()
         )
         cipher = _credential_cipher()
+        webhook_secret = secrets.token_urlsafe(32)
+        encrypted_token = cipher.encrypt(token.encode("utf-8")).decode("ascii")
         if credential is None:
             credential = BotCredentialRecord(
                 project_id=project_id,
-                token_ciphertext=cipher.encrypt(token.encode("utf-8")).decode("ascii"),
+                token_ciphertext=encrypted_token,
                 token_last4=token[-4:],
                 token_version=1,
-                webhook_secret_hash=hash_webhook_secret(secrets.token_urlsafe(32)),
+                webhook_secret_hash=hash_webhook_secret(webhook_secret),
             )
             self.session.add(credential)
-            webhook_secret = secrets.token_urlsafe(32)
-            credential.webhook_secret_hash = hash_webhook_secret(webhook_secret)
         else:
-            credential.token_ciphertext = cipher.encrypt(token.encode("utf-8")).decode("ascii")
+            credential.token_ciphertext = encrypted_token
             credential.token_last4 = token[-4:]
             credential.token_version += 1
-            webhook_secret = secrets.token_urlsafe(32)
             credential.webhook_secret_hash = hash_webhook_secret(webhook_secret)
 
         project.telegram_bot_id = me.id
@@ -138,6 +153,7 @@ class TelegramBotProvisioningService:
                 BotCredentialRecord.project_id == project_id,
                 BotProjectRecord.tenant_id == tenant_id,
             )
+            .with_for_update()
         )
         if credential is None:
             raise TelegramBotNotFound("bot credentials were not found")
@@ -154,10 +170,9 @@ class TelegramBotProvisioningService:
             user_id=user_id, tenant_id=tenant_id, permission=Permission.PROJECT_WRITE
         )
         project = await self.session.scalar(
-            select(BotProjectRecord).where(
-                BotProjectRecord.id == project_id,
-                BotProjectRecord.tenant_id == tenant_id,
-            )
+            select(BotProjectRecord)
+            .where(BotProjectRecord.id == project_id, BotProjectRecord.tenant_id == tenant_id)
+            .with_for_update()
         )
         if project is None:
             raise TelegramBotNotFound("project was not found")
