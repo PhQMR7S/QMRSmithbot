@@ -16,6 +16,7 @@ from qmrsmithbot.auth.authorization import AuthorizationService
 from qmrsmithbot.auth.models import Permission
 from qmrsmithbot.config import settings
 from qmrsmithbot.db.models import BotCredentialRecord, BotProjectRecord
+from qmrsmithbot.db.telegram_runtime_models import TelegramWebhookStateRecord
 
 
 class TelegramProvisioningError(RuntimeError):
@@ -158,6 +159,15 @@ class TelegramBotProvisioningService:
         await authorization.require_permission(
             user_id=user_id, tenant_id=tenant_id, permission=Permission.PROJECT_WRITE
         )
+        webhook_state = await self.session.scalar(
+            select(TelegramWebhookStateRecord.status).where(
+                TelegramWebhookStateRecord.project_id == project_id
+            )
+        )
+        if webhook_state == "active":
+            raise TelegramProvisioningError(
+                "deactivate the Telegram webhook before rotating its secret"
+            )
         credential = await self.session.scalar(
             select(BotCredentialRecord)
             .join(BotProjectRecord, BotProjectRecord.id == BotCredentialRecord.project_id)
