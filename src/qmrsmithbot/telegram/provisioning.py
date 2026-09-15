@@ -80,7 +80,7 @@ class TelegramBotProvisioningService:
         if not token or len(token) > 512:
             raise TelegramBotTokenInvalid("invalid Telegram bot token")
 
-        # Do not hold the project row lock while making a network request to Telegram.
+        # Do not hold a project row lock while making a network request to Telegram.
         await self.session.rollback()
         try:
             bot = Bot(token=token)
@@ -116,25 +116,26 @@ class TelegramBotProvisioningService:
         cipher = _credential_cipher()
         webhook_secret = secrets.token_urlsafe(32)
         encrypted_token = cipher.encrypt(token.encode("utf-8")).decode("ascii")
-        if credential is None:
-            credential = BotCredentialRecord(
-                project_id=project_id,
-                token_ciphertext=encrypted_token,
-                token_last4=token[-4:],
-                token_version=1,
-                webhook_secret_hash=hash_webhook_secret(webhook_secret),
-            )
-            self.session.add(credential)
-        else:
-            credential.token_ciphertext = encrypted_token
-            credential.token_last4 = token[-4:]
-            credential.token_version += 1
-            credential.webhook_secret_hash = hash_webhook_secret(webhook_secret)
 
-        project.telegram_bot_id = me.id
-        project.telegram_username = me.username
         try:
             async with self.session.begin_nested():
+                if credential is None:
+                    credential = BotCredentialRecord(
+                        project_id=project_id,
+                        token_ciphertext=encrypted_token,
+                        token_last4=token[-4:],
+                        token_version=1,
+                        webhook_secret_hash=hash_webhook_secret(webhook_secret),
+                    )
+                    self.session.add(credential)
+                else:
+                    credential.token_ciphertext = encrypted_token
+                    credential.token_last4 = token[-4:]
+                    credential.token_version += 1
+                    credential.webhook_secret_hash = hash_webhook_secret(webhook_secret)
+
+                project.telegram_bot_id = me.id
+                project.telegram_username = me.username
                 await self.session.flush()
         except IntegrityError as exc:
             if "telegram_bot_id" in str(exc.orig):
@@ -142,6 +143,7 @@ class TelegramBotProvisioningService:
                     "Telegram bot is already assigned to another project"
                 ) from exc
             raise
+
         return ProvisionedBot(
             project_id=project_id,
             telegram_bot_id=me.id,
