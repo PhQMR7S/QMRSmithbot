@@ -32,9 +32,9 @@ class WorkflowNode(BaseModel):
 class WorkflowEdge(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    source: str = Field(min_length=1)
-    target: str = Field(min_length=1)
-    condition: str | None = None
+    source: str = Field(min_length=1, max_length=100)
+    target: str = Field(min_length=1, max_length=100)
+    condition: str | None = Field(default=None, max_length=1000)
 
 
 class WorkflowDefinition(BaseModel):
