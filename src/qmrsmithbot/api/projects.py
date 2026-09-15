@@ -47,6 +47,26 @@ async def create_project(
     return project_response(project)
 
 
+@router.get("/{project_id}", response_model=ProjectResponse)
+async def get_project(
+    project_id: UUID,
+    owner_id: int = Depends(get_current_user_id),
+    service: ProjectService = Depends(get_project_service),
+) -> ProjectResponse:
+    project = await service.get_project(project_id=project_id, owner_id=owner_id)
+    return project_response(project)
+
+
+@router.get("/{project_id}/versions", response_model=list[WorkflowVersionResponse])
+async def list_workflow_versions(
+    project_id: UUID,
+    owner_id: int = Depends(get_current_user_id),
+    service: ProjectService = Depends(get_project_service),
+) -> list[WorkflowVersionResponse]:
+    versions = await service.list_versions(project_id=project_id, owner_id=owner_id)
+    return [version_response(version) for version in versions]
+
+
 @router.post(
     "/{project_id}/versions",
     response_model=WorkflowVersionResponse,
