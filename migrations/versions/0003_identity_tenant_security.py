@@ -6,7 +6,6 @@ Create Date: 2026-09-15
 """
 
 from collections.abc import Sequence
-from uuid import uuid4
 
 import sqlalchemy as sa
 from alembic import op
@@ -95,31 +94,25 @@ def upgrade() -> None:
         ondelete="CASCADE",
     )
 
-    connection = op.get_bind()
-    users = connection.execute(sa.text("SELECT id FROM users ORDER BY id")).mappings().all()
-    for user in users:
-        tenant_id = uuid4()
-        connection.execute(
-            sa.text(
-                "INSERT INTO tenants (id, name, slug, created_by_user_id) "
-                "VALUES (:id, :name, :slug, :user_id)"
-            ),
-            {
-                "id": tenant_id,
-                "name": "Personal workspace",
-                "slug": f"personal-{user['id']}",
-                "user_id": user["id"],
-            },
+    op.execute(
+        sa.text(
+            "INSERT INTO tenants (id, name, slug, created_by_user_id) "
+            "SELECT md5('qmrsmithbot:personal:' || id::text)::uuid, "
+            "'Personal workspace', 'personal-' || id::text, id "
+            "FROM users "
+            "ON CONFLICT (slug) DO NOTHING"
         )
-        connection.execute(
-            sa.text(
-                "INSERT INTO tenant_memberships (tenant_id, user_id, role) "
-                "VALUES (:tenant_id, :user_id, 'owner')"
-            ),
-            {"tenant_id": tenant_id, "user_id": user["id"]},
+    )
+    op.execute(
+        sa.text(
+            "INSERT INTO tenant_memberships (tenant_id, user_id, role) "
+            "SELECT t.id, t.created_by_user_id, 'owner' "
+            "FROM tenants AS t "
+            "WHERE t.slug LIKE 'personal-%' "
+            "ON CONFLICT (tenant_id, user_id) DO NOTHING"
         )
-
-    connection.execute(
+    )
+    op.execute(
         sa.text(
             "UPDATE bot_projects AS p "
             "SET tenant_id = t.id "
@@ -143,7 +136,7 @@ def upgrade() -> None:
         ["id"],
         ondelete="SET NULL",
     )
-    connection.execute(
+    op.execute(
         sa.text(
             "UPDATE audit_events AS a "
             "SET tenant_id = p.tenant_id "
