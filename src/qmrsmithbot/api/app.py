@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -14,10 +16,35 @@ from qmrsmithbot.projects.service import (
     ProjectNotFoundError,
     VersionNotFoundError,
 )
+from qmrsmithbot.rate_limit import close_rate_limiter
+from qmrsmithbot.request_context import (
+    attach_request_id,
+    reset_request_id,
+    set_request_id,
+)
 
-app = FastAPI(title="QMRSmithbot", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    yield
+    await close_rate_limiter()
+
+
+app = FastAPI(title="QMRSmithbot", version="0.1.0", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(projects_router)
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    request_id = attach_request_id(request)
+    token = set_request_id(request_id)
+    try:
+        response = await call_next(request)
+    finally:
+        reset_request_id(token)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 @app.exception_handler(ProjectNotFoundError)

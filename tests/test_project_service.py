@@ -138,8 +138,8 @@ async def test_publish_and_rollback_are_audited() -> None:
     await store.create_project(project)
     events: list[str] = []
 
-    async def audit(action: str, project_id: UUID, owner_id: int) -> None:
-        events.append(f"{action}:{project_id}:{owner_id}")
+    async def audit(action: str, project_id: UUID, owner_id: int, tenant_id: UUID) -> None:
+        events.append(f"{action}:{project_id}:{owner_id}:{tenant_id}")
 
     service = ProjectService(store, audit=audit)
     first = await service.save_version(
@@ -160,6 +160,8 @@ async def test_publish_and_rollback_are_audited() -> None:
     assert store.versions[(project.id, 1)].published_at is not None
     assert events[0].startswith("project.publish:")
     assert events[1].startswith("project.rollback:")
+    assert events[0].endswith(f":{TENANT_A}")
+    assert events[1].endswith(f":{TENANT_A}")
 
 
 async def test_publish_rejects_missing_version() -> None:

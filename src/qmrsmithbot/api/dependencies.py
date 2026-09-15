@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -85,14 +85,19 @@ async def get_authorization_service(
 
 
 async def get_project_service(
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AsyncIterator[ProjectService]:
-    async def audit(action: str, project_id: UUID, owner_id: int) -> None:
+    request_id = getattr(request.state, "request_id", None)
+
+    async def audit(action: str, project_id: UUID, actor_user_id: int, tenant_id: UUID) -> None:
         session.add(
             AuditEvent(
-                actor_user_id=owner_id,
+                actor_user_id=actor_user_id,
+                tenant_id=tenant_id,
                 project_id=project_id,
                 action=action,
+                request_id=request_id,
             )
         )
         await session.flush()
