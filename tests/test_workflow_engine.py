@@ -165,7 +165,7 @@ async def test_value_size_budget_is_enforced() -> None:
         context.values["payload"] = "x" * 2048
 
     with pytest.raises(WorkflowExecutionError, match="value size limit"):
-        await WorkflowExecutor(max_value_bytes=1024).run(
+        await WorkflowExecutor({"trigger.command": handle}, max_value_bytes=1024).run(
             workflow,
             ExecutionContext(),
         )
