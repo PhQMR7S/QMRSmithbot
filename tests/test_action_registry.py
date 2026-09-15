@@ -16,4 +16,4 @@ def test_build_action_registry_registers_builtin_external_actions():
         "action.http",
     ):
         handler = registry.resolve(action_type)
-        assert getattr(handler, "action_type") == action_type
+        assert handler.action_type == action_type
