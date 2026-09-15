@@ -106,7 +106,7 @@ class SQLAlchemyProjectStore(ProjectStore):
             owner_id=record.owner_id,
             name=record.name,
             active_version=record.active_version,
-            status=record.status,
+            status=BotStatus(record.status),
         )
 
     @staticmethod
