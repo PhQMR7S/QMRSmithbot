@@ -1,5 +1,6 @@
 from qmrsmithbot.db.models import (
     AuditEvent,
+    BotCredentialRecord,
     BotProjectRecord,
     IdentityRecord,
     OIDCLoginStateRecord,
@@ -20,6 +21,7 @@ def test_database_schema_contains_expected_tables() -> None:
         "tenant_memberships",
         "tenant_invitations",
         "oidc_login_states",
+        "bot_credentials",
         "bot_projects",
         "workflow_versions",
         "audit_events",
@@ -87,3 +89,9 @@ def test_invitation_token_hash_is_unique() -> None:
 def test_oidc_state_has_single_use_fields() -> None:
     assert OIDCLoginStateRecord.__table__.c.state_hash.unique is True
     assert OIDCLoginStateRecord.__table__.c.used_at.nullable is True
+
+
+def test_bot_credentials_are_project_scoped_and_versioned() -> None:
+    assert BotCredentialRecord.__table__.c.project_id.primary_key is True
+    assert BotCredentialRecord.__table__.c.token_ciphertext.nullable is False
+    assert BotCredentialRecord.__table__.c.webhook_secret_hash.nullable is False
