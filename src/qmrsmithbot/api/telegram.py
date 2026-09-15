@@ -34,7 +34,7 @@ async def provision_telegram_bot(
         user_id=principal.user_id,
         tenant_id=tenant_id,
         project_id=project_id,
-        raw_bot_token=payload.bot_token,
+        raw_bot_token=payload.bot_token.get_secret_value(),
     )
     session.add(
         AuditEvent(
