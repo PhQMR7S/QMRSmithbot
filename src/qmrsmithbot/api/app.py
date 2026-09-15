@@ -15,6 +15,7 @@ from qmrsmithbot.auth.service import (
     TenantAdministrationError,
     TenantSelectionRequired,
 )
+from qmrsmithbot.db.session import close_database
 from qmrsmithbot.projects.service import (
     InvalidWorkflowError,
     ProjectNotFoundError,
@@ -32,8 +33,11 @@ from qmrsmithbot.telegram.webhook_service import TelegramWebhookError, TelegramW
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    yield
-    await close_rate_limiter()
+    try:
+        yield
+    finally:
+        await close_rate_limiter()
+        await close_database()
 
 
 app = FastAPI(title="QMRSmithbot", version="0.1.0", lifespan=lifespan)
