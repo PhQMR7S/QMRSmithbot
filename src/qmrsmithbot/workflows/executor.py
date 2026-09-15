@@ -42,16 +42,20 @@ class WorkflowExecutor:
             node_id = queue.popleft()
             if node_id in context.visited:
                 continue
-            if node_id not in nodes:
+            node = nodes.get(node_id)
+            if node is None:
                 raise WorkflowExecutionError(f"unknown node: {node_id}")
+
             steps += 1
             if steps > self.max_steps:
                 raise WorkflowExecutionError("workflow execution step limit exceeded")
 
-            node = nodes[node_id]
             handler = self.handlers.get(node.type)
+            if handler is None and not node.type.startswith("trigger."):
+                raise WorkflowExecutionError(f"no handler registered for node type: {node.type}")
             if handler is not None:
                 await handler(node, context)
+
             context.visited.append(node_id)
             queue.extend(outgoing.get(node_id, ()))
 
