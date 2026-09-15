@@ -107,7 +107,6 @@ class TenantInvitationRecord(Base):
             "role IN ('admin', 'editor', 'viewer')",
             name="ck_tenant_invitations_role",
         ),
-        UniqueConstraint("tenant_id", "email", "revoked_at", name="uq_active_tenant_invitation"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
