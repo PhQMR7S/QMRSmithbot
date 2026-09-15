@@ -6,12 +6,21 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmrsmithbot.api.dependencies import get_current_principal
-from qmrsmithbot.api.schemas import DevSessionRequest, SessionResponse, SessionUserResponse
+from qmrsmithbot.api.schemas import (
+    DevSessionRequest,
+    OIDCCallbackRequest,
+    OIDCStartResponse,
+    SessionResponse,
+    SessionUserResponse,
+)
 from qmrsmithbot.auth.models import Principal
+from qmrsmithbot.auth.oidc import IdentityAlreadyLinked, OIDCError, OIDCService
 from qmrsmithbot.auth.service import IdentityService, SessionService, TenantService
 from qmrsmithbot.config import settings
+from qmrsmithbot.db.models import AuditEvent
 from qmrsmithbot.db.session import get_session
 from qmrsmithbot.rate_limit import enforce_auth_rate_limit
+from qmrsmithbot.request_context import get_request_id
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 RateLimitDependency = Annotated[None, Depends(enforce_auth_rate_limit)]
@@ -35,12 +44,90 @@ async def create_development_session(
         user_agent=user_agent,
         ip_address=client_ip,
     )
+    session.add(
+        AuditEvent(
+            actor_user_id=payload.user_id,
+            action="auth.dev_session.created",
+            request_id=get_request_id(),
+            metadata_json={"session_id": str(principal.session_id)},
+        )
+    )
+    await session.flush()
     return SessionResponse(
         access_token=token,
         token_type="bearer",
         expires_at=expires_at,
         session_id=principal.session_id,
     )
+
+
+@router.get("/oidc/start", response_model=OIDCStartResponse)
+async def start_oidc_login(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> OIDCStartResponse:
+    service = OIDCService(session)
+    try:
+        return OIDCStartResponse(authorization_url=await service.begin())
+    except OIDCError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    finally:
+        await service.close()
+
+
+@router.get("/oidc/link/start", response_model=OIDCStartResponse)
+async def start_oidc_link(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> OIDCStartResponse:
+    service = OIDCService(session)
+    try:
+        return OIDCStartResponse(authorization_url=await service.begin(user_id=principal.user_id))
+    except OIDCError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    finally:
+        await service.close()
+
+
+@router.get("/oidc/callback", response_model=SessionResponse)
+async def oidc_callback(
+    code: str,
+    state: str,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SessionResponse:
+    service = OIDCService(session)
+    try:
+        principal, token, expires_at = await service.callback(code=code, state=state)
+    except IdentityAlreadyLinked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OIDCError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    finally:
+        await service.close()
+    session.add(
+        AuditEvent(
+            actor_user_id=principal.user_id,
+            action="auth.oidc.login_succeeded",
+            request_id=get_request_id(),
+            metadata_json={"session_id": str(principal.session_id)},
+        )
+    )
+    await session.flush()
+    return SessionResponse(
+        access_token=token,
+        token_type="bearer",
+        expires_at=expires_at,
+        session_id=principal.session_id,
+    )
+
+
+@router.post("/oidc/callback", response_model=SessionResponse)
+async def oidc_callback_post(
+    payload: OIDCCallbackRequest,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SessionResponse:
+    return await oidc_callback(payload.code, payload.state, request, session)
 
 
 @router.get("/me", response_model=SessionUserResponse)
@@ -56,3 +143,12 @@ async def logout(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     await SessionService(session).revoke(principal.session_id)
+    session.add(
+        AuditEvent(
+            actor_user_id=principal.user_id,
+            action="auth.session.revoked",
+            request_id=get_request_id(),
+            metadata_json={"session_id": str(principal.session_id)},
+        )
+    )
+    await session.flush()
