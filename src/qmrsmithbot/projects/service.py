@@ -21,6 +21,9 @@ class InvalidWorkflowError(ValueError):
     """Raised when a workflow cannot be persisted or published."""
 
 
+ProjectAudit = Callable[[str, UUID, int, UUID], Awaitable[None]]
+
+
 class ProjectStore:
     """Persistence contract for tenant-scoped project/version lifecycle operations."""
 
@@ -48,7 +51,7 @@ class ProjectStore:
 @dataclass(frozen=True, slots=True)
 class ProjectService:
     store: ProjectStore
-    audit: Callable[[str, UUID, int], Awaitable[None]] | None = None
+    audit: ProjectAudit | None = None
 
     async def create_project(self, *, owner_id: int, tenant_id: UUID, name: str) -> Project:
         if owner_id <= 0:
@@ -90,7 +93,7 @@ class ProjectService:
         stored = self._require_version(await self.store.get_version(project_id, version), version)
         self._validate_definition(stored.definition)
         project = await self.store.activate_version(project_id, version)
-        await self._audit("project.publish", project_id, actor_user_id)
+        await self._audit("project.publish", project_id, actor_user_id, tenant_id)
         return project
 
     async def rollback(
@@ -105,12 +108,14 @@ class ProjectService:
         stored = self._require_version(await self.store.get_version(project_id, version), version)
         self._validate_definition(stored.definition)
         project = await self.store.activate_version(project_id, version)
-        await self._audit("project.rollback", project_id, actor_user_id)
+        await self._audit("project.rollback", project_id, actor_user_id, tenant_id)
         return project
 
-    async def _audit(self, action: str, project_id: UUID, actor_user_id: int) -> None:
+    async def _audit(
+        self, action: str, project_id: UUID, actor_user_id: int, tenant_id: UUID
+    ) -> None:
         if self.audit is not None:
-            await self.audit(action, project_id, actor_user_id)
+            await self.audit(action, project_id, actor_user_id, tenant_id)
 
     @staticmethod
     def _validate_definition(definition: dict) -> WorkflowDefinition:

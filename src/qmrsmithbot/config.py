@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     auth_dev_bootstrap_enabled: bool = True
     session_absolute_ttl_minutes: int = Field(default=480, ge=5, le=10080)
     session_idle_ttl_minutes: int = Field(default=30, ge=5, le=1440)
+    rate_limit_enabled: bool = False
+    rate_limit_requests: int = Field(default=10, ge=1, le=10000)
+    rate_limit_window_seconds: int = Field(default=60, ge=1, le=3600)
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 
@@ -35,6 +38,8 @@ class Settings(BaseSettings):
                 raise ValueError("DATABASE_URL must be explicitly configured in production")
             if self.auth_dev_bootstrap_enabled:
                 raise ValueError("AUTH_DEV_BOOTSTRAP_ENABLED must be false in production")
+            if not self.rate_limit_enabled:
+                raise ValueError("RATE_LIMIT_ENABLED must be true in production")
         if self.platform_required_channel_enabled and not self.platform_required_channel.strip():
             raise ValueError(
                 "PLATFORM_REQUIRED_CHANNEL is required when platform access protection is enabled"
