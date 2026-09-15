@@ -2,7 +2,9 @@ from qmrsmithbot.db.models import (
     AuditEvent,
     BotProjectRecord,
     IdentityRecord,
+    OIDCLoginStateRecord,
     SessionRecord,
+    TenantInvitationRecord,
     TenantMembershipRecord,
     TenantRecord,
     WorkflowVersionRecord,
@@ -16,6 +18,8 @@ def test_database_schema_contains_expected_tables() -> None:
         "sessions",
         "tenants",
         "tenant_memberships",
+        "tenant_invitations",
+        "oidc_login_states",
         "bot_projects",
         "workflow_versions",
         "audit_events",
@@ -74,3 +78,12 @@ def test_audit_event_preserves_project_actor_and_tenant_links() -> None:
 
 def test_tenant_model_has_unique_slug() -> None:
     assert TenantRecord.__table__.c.slug.unique is True
+
+
+def test_invitation_token_hash_is_unique() -> None:
+    assert TenantInvitationRecord.__table__.c.token_hash.unique is True
+
+
+def test_oidc_state_has_single_use_fields() -> None:
+    assert OIDCLoginStateRecord.__table__.c.state_hash.unique is True
+    assert OIDCLoginStateRecord.__table__.c.used_at.nullable is True

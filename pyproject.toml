@@ -17,6 +17,7 @@ dependencies = [
   "redis>=6,<7",
   "alembic>=1.16,<2",
   "cryptography>=45,<47",
+  "PyJWT[crypto]>=2.10,<3",
 ]
 
 [project.optional-dependencies]
