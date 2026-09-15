@@ -1,5 +1,7 @@
+from collections.abc import Iterator
 from uuid import UUID, uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 from qmrsmithbot.api.app import app
@@ -45,26 +47,39 @@ class FakeProjectStore:
     async def get_version(self, project_id: UUID, version: int) -> WorkflowVersion | None:
         return self.versions.get((project_id, version))
 
+    async def list_versions(self, project_id: UUID) -> list[WorkflowVersion]:
+        return sorted(
+            (
+                version
+                for (stored_project_id, _), version in self.versions.items()
+                if stored_project_id == project_id
+            ),
+            key=lambda version: version.version,
+            reverse=True,
+        )
+
     async def activate_version(self, project_id: UUID, version: int) -> BotProject:
         project = self.projects[project_id]
-        updated = BotProject(
-            project.id,
-            project.owner_id,
-            project.name,
-            version,
-        )
+        updated = BotProject(project.id, project.owner_id, project.name, version)
         self.projects[project_id] = updated
         return updated
 
 
-store = FakeProjectStore()
-service = ProjectService(store)
-app.dependency_overrides[get_current_user_id] = lambda: 42
-app.dependency_overrides[get_project_service] = lambda: service
+@pytest.fixture
+def client() -> Iterator[TestClient]:
+    store = FakeProjectStore()
+    service = ProjectService(store)
+    app.dependency_overrides[get_current_user_id] = lambda: 42
+    app.dependency_overrides[get_project_service] = lambda: service
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.pop(get_current_user_id, None)
+        app.dependency_overrides.pop(get_project_service, None)
 
 
-def test_create_project_endpoint() -> None:
-    response = TestClient(app).post("/api/v1/projects", json={"name": "  API Bot  "})
+def test_create_project_endpoint(client: TestClient) -> None:
+    response = client.post("/api/v1/projects", json={"name": "  API Bot  "})
 
     assert response.status_code == 201
     body = response.json()
@@ -73,8 +88,7 @@ def test_create_project_endpoint() -> None:
     assert body["status"] == "draft"
 
 
-def test_workflow_lifecycle_endpoints() -> None:
-    client = TestClient(app)
+def test_workflow_lifecycle_endpoints(client: TestClient) -> None:
     project = client.post("/api/v1/projects", json={"name": "Lifecycle Bot"}).json()
     project_id = project["id"]
 
@@ -85,15 +99,15 @@ def test_workflow_lifecycle_endpoints() -> None:
     assert created.status_code == 201
     assert created.json()["version"] == 1
 
+    versions = client.get(f"/api/v1/projects/{project_id}/versions")
+    assert versions.status_code == 200
+    assert [item["version"] for item in versions.json()] == [1]
+
     published = client.post(f"/api/v1/projects/{project_id}/publish/1")
     assert published.status_code == 200
     assert published.json()["active_version"] == 1
 
 
 def test_missing_owner_identity_is_rejected() -> None:
-    app.dependency_overrides.pop(get_current_user_id)
-    try:
-        response = TestClient(app).post("/api/v1/projects", json={"name": "No Auth"})
-        assert response.status_code == 401
-    finally:
-        app.dependency_overrides[get_current_user_id] = lambda: 42
+    response = TestClient(app).post("/api/v1/projects", json={"name": "No Auth"})
+    assert response.status_code == 401
