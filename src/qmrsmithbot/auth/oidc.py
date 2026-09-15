@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import json
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import httpx
 import jwt
@@ -45,7 +44,9 @@ class OIDCService:
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
-        self._http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0), follow_redirects=False)
+        self._http = httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0, connect=5.0), follow_redirects=False
+        )
 
     async def close(self) -> None:
         await self._http.aclose()
@@ -74,7 +75,10 @@ class OIDCService:
         authorization_endpoint = metadata.get("authorization_endpoint")
         token_endpoint = metadata.get("token_endpoint")
         jwks_uri = metadata.get("jwks_uri")
-        if not all(isinstance(value, str) and value.startswith("https://") for value in (authorization_endpoint, token_endpoint, jwks_uri)):
+        if not all(
+            isinstance(value, str) and value.startswith("https://")
+            for value in (authorization_endpoint, token_endpoint, jwks_uri)
+        ):
             raise OIDCError("OIDC discovery contains invalid HTTPS endpoints")
         return metadata
 
@@ -89,7 +93,11 @@ class OIDCService:
         state = secrets.token_urlsafe(32)
         nonce = secrets.token_urlsafe(32)
         verifier = secrets.token_urlsafe(64)
-        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+        challenge = (
+            base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
+            .rstrip(b"=")
+            .decode()
+        )
         record = OIDCLoginStateRecord(
             id=uuid4(),
             state_hash=self._hash(state),
@@ -152,10 +160,14 @@ class OIDCService:
         if not isinstance(id_token, str):
             raise OIDCError("OIDC token response did not contain an ID token")
 
-        profile = await self._verify_id_token(id_token, metadata=metadata, expected_nonce_hash=record.nonce_hash)
+        profile = await self._verify_id_token(
+            id_token, metadata=metadata, expected_nonce_hash=record.nonce_hash
+        )
         user_id = await self._resolve_identity(profile, linked_user_id=record.user_id)
         await TenantService(self.session).ensure_personal_tenant(user_id)
-        principal, access_token, expires_at = await SessionService(self.session).create_session(user_id=user_id)
+        principal, access_token, expires_at = await SessionService(self.session).create_session(
+            user_id=user_id
+        )
         return principal, access_token, expires_at
 
     async def _verify_id_token(
@@ -206,8 +218,14 @@ class OIDCService:
             subject=subject,
             email=email.strip().lower() if email else None,
             email_verified=claims.get("email_verified") is True,
-            username=claims.get("preferred_username") if isinstance(claims.get("preferred_username"), str) else None,
-            first_name=claims.get("given_name") if isinstance(claims.get("given_name"), str) else None,
+            username=(
+                claims.get("preferred_username")
+                if isinstance(claims.get("preferred_username"), str)
+                else None
+            ),
+            first_name=(
+                claims.get("given_name") if isinstance(claims.get("given_name"), str) else None
+            ),
         )
 
     async def _resolve_identity(self, profile: OIDCProfile, *, linked_user_id: int | None) -> int:
