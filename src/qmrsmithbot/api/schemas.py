@@ -25,6 +25,17 @@ class SessionResponse(BaseModel):
     session_id: UUID
 
 
+class SessionInfoResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    created_at: datetime
+    last_seen_at: datetime
+    expires_at: datetime
+    user_agent: str | None
+    ip_address: str | None
+
+
 class SessionUserResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
