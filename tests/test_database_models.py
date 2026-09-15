@@ -95,3 +95,7 @@ def test_bot_credentials_are_project_scoped_and_versioned() -> None:
     assert BotCredentialRecord.__table__.c.project_id.primary_key is True
     assert BotCredentialRecord.__table__.c.token_ciphertext.nullable is False
     assert BotCredentialRecord.__table__.c.webhook_secret_hash.nullable is False
+    assert any(
+        constraint.name == "ck_bot_credentials_token_version_positive"
+        for constraint in BotCredentialRecord.__table__.constraints
+    )
