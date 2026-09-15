@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from uuid import UUID, uuid4
 
 from qmrsmithbot.domain.models import BotProject as Project
-from qmrsmithbot.domain.models import BotStatus
 from qmrsmithbot.domain.models import WorkflowVersion
 from qmrsmithbot.workflows.schema import WorkflowDefinition
 
