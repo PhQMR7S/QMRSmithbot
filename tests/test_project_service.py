@@ -52,9 +52,6 @@ class FakeProjectStore:
         self.projects[project_id] = updated
         stored = self.versions[(project_id, version)]
         self.versions[(project_id, version)] = WorkflowVersion(
-            stored.id, stored.project_id, stored.version, stored.definition, stored.published_at
-        )
-        self.versions[(project_id, version)] = WorkflowVersion(
             stored.id,
             stored.project_id,
             stored.version,
@@ -80,6 +77,13 @@ async def test_create_project_rejects_empty_name(name: str) -> None:
 
     with pytest.raises(ValueError, match="must not be empty"):
         await service.create_project(owner_id=42, name=name)
+
+
+async def test_create_project_rejects_non_positive_owner() -> None:
+    service = ProjectService(FakeProjectStore())
+
+    with pytest.raises(ValueError, match="owner id must be positive"):
+        await service.create_project(owner_id=0, name="My Bot")
 
 
 async def test_save_version_is_owner_scoped_and_validated() -> None:
@@ -140,10 +144,3 @@ async def test_publish_rejects_missing_version() -> None:
 
     with pytest.raises(VersionNotFoundError):
         await service.publish(project_id=project.id, owner_id=42, version=99)
-
-
-async def test_create_project_rejects_non_positive_owner() -> None:
-    service = ProjectService(FakeProjectStore())
-
-    with pytest.raises(ValueError, match="owner id must be positive"):
-        await service.create_project(owner_id=0, name="My Bot")
