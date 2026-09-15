@@ -12,9 +12,9 @@ from qmrsmithbot.auth.authorization import AuthorizationService
 from qmrsmithbot.auth.models import Principal
 from qmrsmithbot.auth.service import (
     AuthenticationError,
+    SessionService,
     TenantAccessError,
     TenantSelectionRequired,
-    SessionService,
     TenantService,
 )
 from qmrsmithbot.db.models import AuditEvent

@@ -4,7 +4,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from qmrsmithbot.auth.models import Permission, ROLE_PERMISSIONS, TenantMembership, TenantRole
+from qmrsmithbot.auth.models import ROLE_PERMISSIONS, Permission, TenantMembership, TenantRole
 from qmrsmithbot.auth.service import TenantService
 
 
