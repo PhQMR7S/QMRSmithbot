@@ -10,7 +10,10 @@ from qmrsmithbot.db.models import (
     TenantRecord,
     WorkflowVersionRecord,
 )
-from qmrsmithbot.db.telegram_runtime_models import TelegramUpdateInboxRecord, TelegramWebhookStateRecord
+from qmrsmithbot.db.telegram_runtime_models import (
+    TelegramUpdateInboxRecord,
+    TelegramWebhookStateRecord,
+)
 
 
 def test_database_schema_contains_expected_tables() -> None:
