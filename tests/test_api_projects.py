@@ -1,5 +1,5 @@
 from collections.abc import Iterator
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -102,6 +102,10 @@ def test_workflow_lifecycle_endpoints(client: TestClient) -> None:
     versions = client.get(f"/api/v1/projects/{project_id}/versions")
     assert versions.status_code == 200
     assert [item["version"] for item in versions.json()] == [1]
+
+    fetched = client.get(f"/api/v1/projects/{project_id}")
+    assert fetched.status_code == 200
+    assert fetched.json()["id"] == project_id
 
     published = client.post(f"/api/v1/projects/{project_id}/publish/1")
     assert published.status_code == 200
