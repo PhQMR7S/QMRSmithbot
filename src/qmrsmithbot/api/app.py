@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from qmrsmithbot.api.auth import router as auth_router
 from qmrsmithbot.api.projects import router as projects_router
+from qmrsmithbot.api.telegram import router as telegram_router
 from qmrsmithbot.api.tenants import router as tenants_router
 from qmrsmithbot.auth.authorization import AuthorizationDenied
 from qmrsmithbot.auth.service import (
@@ -24,6 +25,7 @@ from qmrsmithbot.request_context import (
     reset_request_id,
     set_request_id,
 )
+from qmrsmithbot.telegram.provisioning import TelegramBotAlreadyAssigned, TelegramProvisioningError
 
 
 @asynccontextmanager
@@ -36,6 +38,7 @@ app = FastAPI(title="QMRSmithbot", version="0.1.0", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(projects_router)
 app.include_router(tenants_router)
+app.include_router(telegram_router)
 
 
 @app.middleware("http")
@@ -92,6 +95,16 @@ async def tenant_administration_error(_: Request, exc: TenantAdministrationError
 @app.exception_handler(TenantAccessError)
 async def tenant_access_error(_: Request, exc: TenantAccessError) -> JSONResponse:
     return JSONResponse(status_code=403, content={"detail": str(exc)})
+
+
+@app.exception_handler(TelegramBotAlreadyAssigned)
+async def telegram_bot_already_assigned(_: Request, exc: TelegramBotAlreadyAssigned) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@app.exception_handler(TelegramProvisioningError)
+async def telegram_provisioning_error(_: Request, exc: TelegramProvisioningError) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
 @app.get("/health")
