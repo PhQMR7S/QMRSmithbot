@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import StrEnum
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
@@ -20,13 +19,7 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from qmrsmithbot.db.base import Base
-
-
-class BotProjectStatus(StrEnum):
-    DRAFT = "draft"
-    RUNNING = "running"
-    STOPPED = "stopped"
-    ERROR = "error"
+from qmrsmithbot.domain.models import BotStatus
 
 
 class User(Base):
@@ -57,9 +50,7 @@ class BotProjectRecord(Base):
     name: Mapped[str] = mapped_column(String(120))
     telegram_bot_id: Mapped[int | None] = mapped_column(BigInteger, unique=True)
     telegram_username: Mapped[str | None] = mapped_column(String(255), index=True)
-    status: Mapped[BotProjectStatus] = mapped_column(
-        String(32), default=BotProjectStatus.DRAFT, nullable=False
-    )
+    status: Mapped[BotStatus] = mapped_column(String(32), default=BotStatus.DRAFT, nullable=False)
     active_version: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
