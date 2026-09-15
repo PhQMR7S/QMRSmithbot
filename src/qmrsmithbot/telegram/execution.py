@@ -44,7 +44,7 @@ class TelegramRuntimeExecutionBoundary:
     ) -> None:
         try:
             update = Update.model_validate(item.payload)
-        except Exception as exc:
+        except ValueError as exc:
             raise NonRetryableTelegramUpdateError("persisted Telegram update is invalid") from exc
 
         context = TelegramRuntimeContext(
