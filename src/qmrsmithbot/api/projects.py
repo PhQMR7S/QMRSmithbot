@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -15,6 +16,8 @@ from qmrsmithbot.domain.models import BotProject, WorkflowVersion
 from qmrsmithbot.projects.service import ProjectService
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
+CurrentUserId = Annotated[int, Depends(get_current_user_id)]
+ProjectServiceDependency = Annotated[ProjectService, Depends(get_project_service)]
 
 
 def project_response(project: BotProject) -> ProjectResponse:
@@ -40,8 +43,8 @@ def version_response(version: WorkflowVersion) -> WorkflowVersionResponse:
 @router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 async def create_project(
     payload: ProjectCreateRequest,
-    owner_id: int = Depends(get_current_user_id),
-    service: ProjectService = Depends(get_project_service),
+    owner_id: CurrentUserId,
+    service: ProjectServiceDependency,
 ) -> ProjectResponse:
     project = await service.create_project(owner_id=owner_id, name=payload.name)
     return project_response(project)
@@ -50,8 +53,8 @@ async def create_project(
 @router.get("/{project_id}", response_model=ProjectResponse)
 async def get_project(
     project_id: UUID,
-    owner_id: int = Depends(get_current_user_id),
-    service: ProjectService = Depends(get_project_service),
+    owner_id: CurrentUserId,
+    service: ProjectServiceDependency,
 ) -> ProjectResponse:
     project = await service.get_project(project_id=project_id, owner_id=owner_id)
     return project_response(project)
@@ -60,8 +63,8 @@ async def get_project(
 @router.get("/{project_id}/versions", response_model=list[WorkflowVersionResponse])
 async def list_workflow_versions(
     project_id: UUID,
-    owner_id: int = Depends(get_current_user_id),
-    service: ProjectService = Depends(get_project_service),
+    owner_id: CurrentUserId,
+    service: ProjectServiceDependency,
 ) -> list[WorkflowVersionResponse]:
     versions = await service.list_versions(project_id=project_id, owner_id=owner_id)
     return [version_response(version) for version in versions]
@@ -75,8 +78,8 @@ async def list_workflow_versions(
 async def save_workflow_version(
     project_id: UUID,
     payload: WorkflowVersionCreateRequest,
-    owner_id: int = Depends(get_current_user_id),
-    service: ProjectService = Depends(get_project_service),
+    owner_id: CurrentUserId,
+    service: ProjectServiceDependency,
 ) -> WorkflowVersionResponse:
     version = await service.save_version(
         project_id=project_id,
@@ -90,8 +93,8 @@ async def save_workflow_version(
 async def publish_workflow(
     project_id: UUID,
     version: int,
-    owner_id: int = Depends(get_current_user_id),
-    service: ProjectService = Depends(get_project_service),
+    owner_id: CurrentUserId,
+    service: ProjectServiceDependency,
 ) -> ProjectResponse:
     project = await service.publish(project_id=project_id, owner_id=owner_id, version=version)
     return project_response(project)
@@ -101,8 +104,8 @@ async def publish_workflow(
 async def rollback_workflow(
     project_id: UUID,
     version: int,
-    owner_id: int = Depends(get_current_user_id),
-    service: ProjectService = Depends(get_project_service),
+    owner_id: CurrentUserId,
+    service: ProjectServiceDependency,
 ) -> ProjectResponse:
     project = await service.rollback(project_id=project_id, owner_id=owner_id, version=version)
     return project_response(project)
