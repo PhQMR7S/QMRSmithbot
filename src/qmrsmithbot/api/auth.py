@@ -78,7 +78,7 @@ async def start_oidc_login(
         await service.close()
 
 
-@router.get("/oidc/link/start", response_model=OIDCStartResponse)
+@router.post("/oidc/link/start", response_model=OIDCStartResponse)
 async def start_oidc_link(
     _: RateLimitDependency,
     principal: Annotated[Principal, Depends(get_current_principal)],
