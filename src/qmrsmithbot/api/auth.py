@@ -10,12 +10,14 @@ from qmrsmithbot.api.schemas import (
     DevSessionRequest,
     OIDCCallbackRequest,
     OIDCStartResponse,
+    SessionInfoResponse,
     SessionResponse,
     SessionUserResponse,
 )
 from qmrsmithbot.auth.models import Principal
 from qmrsmithbot.auth.oidc import IdentityAlreadyLinked, OIDCError, OIDCService
 from qmrsmithbot.auth.service import IdentityService, SessionService, TenantService
+from qmrsmithbot.auth.session_admin import SessionAdministrationService
 from qmrsmithbot.config import settings
 from qmrsmithbot.db.models import AuditEvent
 from qmrsmithbot.db.session import get_session
@@ -152,6 +154,64 @@ async def oidc_callback_post(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SessionResponse:
     return await _finish_oidc_callback(code=payload.code, state=payload.state, session=session)
+
+
+@router.get("/sessions", response_model=list[SessionInfoResponse])
+async def list_sessions(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[SessionInfoResponse]:
+    sessions = await SessionAdministrationService(session).list_active(principal.user_id)
+    return [SessionInfoResponse(**item.__dict__) for item in sessions]
+
+
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_session(
+    session_id: str,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    try:
+        from uuid import UUID
+
+        parsed_session_id = UUID(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="session_id must be a valid UUID") from exc
+    if parsed_session_id == principal.session_id:
+        raise HTTPException(status_code=400, detail="use logout to revoke the current session")
+    changed = await SessionAdministrationService(session).revoke(
+        user_id=principal.user_id, session_id=parsed_session_id
+    )
+    if not changed:
+        raise HTTPException(status_code=404, detail="session was not found")
+    session.add(
+        AuditEvent(
+            actor_user_id=principal.user_id,
+            action="auth.session.revoked_remote",
+            request_id=get_request_id(),
+            metadata_json={"session_id": str(parsed_session_id)},
+        )
+    )
+    await session.flush()
+
+
+@router.post("/sessions/revoke-others", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_other_sessions(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    count = await SessionService(session).revoke_all_except(
+        user_id=principal.user_id, session_id=principal.session_id
+    )
+    session.add(
+        AuditEvent(
+            actor_user_id=principal.user_id,
+            action="auth.sessions.revoke_others",
+            request_id=get_request_id(),
+            metadata_json={"revoked_count": count},
+        )
+    )
+    await session.flush()
 
 
 @router.get("/me", response_model=SessionUserResponse)
