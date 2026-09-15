@@ -1,0 +1,30 @@
+[project]
+name = "qmrsmithbot"
+version = "0.1.0"
+description = "Production-grade Telegram Bot Builder platform"
+requires-python = ">=3.12"
+dependencies = [
+  "aiogram>=3.22,<4",
+  "fastapi>=0.116,<1",
+  "uvicorn[standard]>=0.35,<1",
+  "pydantic-settings>=2.10,<3",
+  "sqlalchemy[asyncio]>=2.0,<3",
+  "asyncpg>=0.30,<1",
+  "redis>=6,<7",
+  "alembic>=1.16,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<9",
+  "pytest-asyncio>=1,<2",
+  "httpx>=0.28,<1",
+  "ruff>=0.12,<1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
