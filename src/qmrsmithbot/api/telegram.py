@@ -4,12 +4,13 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmrsmithbot.api.dependencies import get_current_principal, get_current_tenant_id
 from qmrsmithbot.api.schemas import TelegramBotProvisionRequest, TelegramBotProvisionResponse
 from qmrsmithbot.auth.models import Principal
-from qmrsmithbot.db.models import AuditEvent
+from qmrsmithbot.db.models import AuditEvent, BotProjectRecord
 from qmrsmithbot.db.session import get_session
 from qmrsmithbot.request_context import get_request_id
 from qmrsmithbot.telegram.provisioning import TelegramBotProvisioningService
@@ -71,7 +72,11 @@ async def rotate_webhook_secret(
     secret = await service.rotate_webhook_secret(
         user_id=principal.user_id, tenant_id=tenant_id, project_id=project_id
     )
-    project = await session.get(__import__("qmrsmithbot.db.models", fromlist=["BotProjectRecord"]).BotProjectRecord, project_id)
+    project = await session.scalar(
+        select(BotProjectRecord).where(
+            BotProjectRecord.id == project_id, BotProjectRecord.tenant_id == tenant_id
+        )
+    )
     if project is None:
         raise RuntimeError("project disappeared during webhook secret rotation")
     session.add(
@@ -109,6 +114,7 @@ async def disconnect_telegram_bot(
             project_id=project_id,
             action="telegram.bot.disconnected",
             request_id=get_request_id(),
+            metadata_json={},
         )
     )
     await session.flush()
