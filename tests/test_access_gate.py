@@ -10,7 +10,7 @@ class FakeMembership:
 
 
 async def test_gate_reports_all_missing_channels() -> None:
-    gate = PlatformAccessGate(FakeMembership({(7, "@qmr") }))
+    gate = PlatformAccessGate(FakeMembership({(7, "@qmr")}))
     decision = await gate.check(
         user_id=7,
         enabled=True,
