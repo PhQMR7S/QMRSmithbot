@@ -10,11 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmrsmithbot.db.models import BotProjectRecord, WorkflowVersionRecord
-from qmrsmithbot.telegram.execution import (
-    NonRetryableTelegramUpdateError,
-    TelegramRuntimeContext,
-    TelegramUpdateHandler,
-)
+from qmrsmithbot.telegram.execution import NonRetryableTelegramUpdateError, TelegramRuntimeContext, TelegramUpdateHandler
 from qmrsmithbot.telegram.queue import ClaimedTelegramUpdate
 from qmrsmithbot.workflows.schema import WorkflowDefinition, WorkflowNode
 
@@ -62,20 +58,16 @@ class DispatchPlan:
 
 
 class PublishedWorkflowRepository(Protocol):
-    async def get_for_update(
-        self, *, project_id: UUID, telegram_bot_id: int
-    ) -> PublishedWorkflow | None: ...
+    async def get_for_update(self, *, project_id: UUID, telegram_bot_id: int) -> PublishedWorkflow | None: ...
 
 
 class SQLAlchemyPublishedWorkflowRepository:
-    """Read-only selection of the currently published workflow for a bot."""
+    """Read-only, tenant-safe selection of the currently published workflow."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def get_for_update(
-        self, *, project_id: UUID, telegram_bot_id: int
-    ) -> PublishedWorkflow | None:
+    async def get_for_update(self, *, project_id: UUID, telegram_bot_id: int) -> PublishedWorkflow | None:
         row = await self.session.execute(
             select(BotProjectRecord, WorkflowVersionRecord)
             .join(
@@ -100,9 +92,7 @@ class SQLAlchemyPublishedWorkflowRepository:
         try:
             definition = WorkflowDefinition.model_validate(version.definition)
         except ValueError as exc:
-            raise NonRetryableTelegramUpdateError(
-                "published workflow definition is invalid"
-            ) from exc
+            raise NonRetryableTelegramUpdateError("published workflow definition is invalid") from exc
         return PublishedWorkflow(
             project_id=project.id,
             tenant_id=project.tenant_id,
@@ -117,9 +107,7 @@ class SQLAlchemyPublishedWorkflowRepository:
 class TelegramEventClassifier:
     """Deterministically classifies an aiogram Update without executing workflow logic."""
 
-    _COMMAND_RE = re.compile(
-        r"^/([A-Za-z0-9_]{1,64})(?:@([A-Za-z0-9_]{1,255}))?(?:\s|$)"
-    )
+    _COMMAND_RE = re.compile(r"^/([A-Za-z0-9_]{1,64})(?:@([A-Za-z0-9_]{1,255}))?(?:\s|$)")
 
     @classmethod
     def classify(cls, update: Update, *, telegram_username: str | None = None) -> TelegramEvent:
@@ -128,47 +116,13 @@ class TelegramEventClassifier:
             text = message.text
             command = cls._extract_command(text, telegram_username=telegram_username)
             if command is not None:
-                return TelegramEvent(
-                    kind="command",
-                    update_id=update.update_id,
-                    chat_id=message.chat.id,
-                    user_id=message.from_user.id if message.from_user else None,
-                    text=text,
-                    command=command,
-                    callback_data=None,
-                )
+                return TelegramEvent("command", update.update_id, message.chat.id, message.from_user.id if message.from_user else None, text, command, None)
             if text is not None:
-                return TelegramEvent(
-                    kind="message",
-                    update_id=update.update_id,
-                    chat_id=message.chat.id,
-                    user_id=message.from_user.id if message.from_user else None,
-                    text=text,
-                    command=None,
-                    callback_data=None,
-                )
-
+                return TelegramEvent("message", update.update_id, message.chat.id, message.from_user.id if message.from_user else None, text, None, None)
         callback = update.callback_query
         if callback is not None:
-            return TelegramEvent(
-                kind="callback",
-                update_id=update.update_id,
-                chat_id=callback.message.chat.id if callback.message else None,
-                user_id=callback.from_user.id if callback.from_user else None,
-                text=None,
-                command=None,
-                callback_data=callback.data,
-            )
-
-        return TelegramEvent(
-            kind="unknown",
-            update_id=update.update_id,
-            chat_id=None,
-            user_id=None,
-            text=None,
-            command=None,
-            callback_data=None,
-        )
+            return TelegramEvent("callback", update.update_id, callback.message.chat.id if callback.message else None, callback.from_user.id if callback.from_user else None, None, None, callback.data)
+        return TelegramEvent("unknown", update.update_id, None, None, None, None, None)
 
     @classmethod
     def _extract_command(cls, text: str | None, *, telegram_username: str | None) -> str | None:
@@ -189,24 +143,18 @@ class TelegramTriggerResolver:
 
     @staticmethod
     def resolve(definition: WorkflowDefinition, event: TelegramEvent) -> tuple[TriggerMatch, ...]:
-        return tuple(
-            TriggerMatch(node_id=node.id, node_type=node.type)
-            for node in definition.nodes
-            if node.type.startswith("trigger.") and TelegramTriggerResolver._matches(node, event)
-        )
+        return tuple(TriggerMatch(node.id, node.type) for node in definition.nodes if node.type.startswith("trigger.") and TelegramTriggerResolver._matches(node, event))
 
     @staticmethod
     def _matches(node: WorkflowNode, event: TelegramEvent) -> bool:
         config: dict[str, Any] = node.config
-        expected_kind = node.type.removeprefix("trigger.")
-        if event.kind != expected_kind:
+        if event.kind != node.type.removeprefix("trigger."):
             return False
         if event.kind == "command":
             values = config.get("commands", config.get("command"))
             if values is None:
                 return True
-            if isinstance(values, str):
-                values = [values]
+            values = [values] if isinstance(values, str) else values
             if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
                 return False
             expected = {value.strip().lstrip("/").casefold() for value in values if value.strip()}
@@ -248,43 +196,17 @@ class TelegramWorkflowDispatcher:
 
     async def dispatch(self, item: ClaimedTelegramUpdate) -> DispatchPlan | None:
         update = self._validate_update(item.payload)
-        return await self.dispatch_update(
-            project_id=item.project_id,
-            telegram_bot_id=item.telegram_bot_id,
-            update=update,
-            update_id=item.update_id,
-        )
+        return await self.dispatch_update(project_id=item.project_id, telegram_bot_id=item.telegram_bot_id, update=update, update_id=item.update_id)
 
-    async def dispatch_update(
-        self,
-        *,
-        project_id: UUID,
-        telegram_bot_id: int,
-        update: Update,
-        update_id: int,
-    ) -> DispatchPlan | None:
-        workflow = await self.repository.get_for_update(
-            project_id=project_id,
-            telegram_bot_id=telegram_bot_id,
-        )
+    async def dispatch_update(self, *, project_id: UUID, telegram_bot_id: int, update: Update, update_id: int) -> DispatchPlan | None:
+        workflow = await self.repository.get_for_update(project_id=project_id, telegram_bot_id=telegram_bot_id)
         if workflow is None:
             return None
-        event = TelegramEventClassifier.classify(
-            update, telegram_username=workflow.telegram_username
-        )
+        event = TelegramEventClassifier.classify(update, telegram_username=workflow.telegram_username)
         triggers = TelegramTriggerResolver.resolve(workflow.definition, event)
         if not triggers:
             return None
-        return DispatchPlan(
-            project_id=workflow.project_id,
-            tenant_id=workflow.tenant_id,
-            update_id=update_id,
-            workflow_version_id=workflow.version_id,
-            workflow_version=workflow.version,
-            event=event,
-            triggers=triggers,
-            definition=workflow.definition,
-        )
+        return DispatchPlan(project_id=workflow.project_id, tenant_id=workflow.tenant_id, update_id=update_id, workflow_version_id=workflow.version_id, workflow_version=workflow.version, event=event, triggers=triggers, definition=workflow.definition)
 
     @staticmethod
     def _validate_update(payload: dict) -> Update:
@@ -299,18 +221,13 @@ class DispatchPlanSink(Protocol):
 
 
 class TelegramWorkflowDispatchHandler(TelegramUpdateHandler):
-    """Worker adapter; the sink is the intentionally separate future workflow runtime."""
+    """Worker adapter; the sink is the workflow runtime boundary."""
 
     def __init__(self, dispatcher: TelegramWorkflowDispatcher, sink: DispatchPlanSink) -> None:
         self.dispatcher = dispatcher
         self.sink = sink
 
     async def handle(self, *, update: Update, context: TelegramRuntimeContext) -> None:
-        plan = await self.dispatcher.dispatch_update(
-            project_id=context.project_id,
-            telegram_bot_id=context.telegram_bot_id,
-            update=update,
-            update_id=context.update_id,
-        )
+        plan = await self.dispatcher.dispatch_update(project_id=context.project_id, telegram_bot_id=context.telegram_bot_id, update=update, update_id=context.update_id)
         if plan is not None:
             await self.sink.accept(plan=plan, context=context)
