@@ -9,11 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmrsmithbot.api.dependencies import get_current_principal, get_current_tenant_id
 from qmrsmithbot.api.schemas import TelegramBotProvisionRequest, TelegramBotProvisionResponse
+from qmrsmithbot.api.telegram_runtime_schemas import TelegramWebhookActivationResponse
 from qmrsmithbot.auth.models import Principal
 from qmrsmithbot.db.models import AuditEvent, BotProjectRecord
 from qmrsmithbot.db.session import get_session
 from qmrsmithbot.request_context import get_request_id
 from qmrsmithbot.telegram.provisioning import TelegramBotProvisioningService
+from qmrsmithbot.telegram.webhook_service import TelegramWebhookService
 
 router = APIRouter(prefix="/api/v1/projects", tags=["telegram"])
 
@@ -56,6 +58,60 @@ async def provision_telegram_bot(
         telegram_username=provisioned.telegram_username,
         webhook_secret=provisioned.webhook_secret,
     )
+
+
+@router.post(
+    "/{project_id}/telegram/webhook/activate",
+    response_model=TelegramWebhookActivationResponse,
+)
+async def activate_telegram_webhook(
+    project_id: UUID,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    tenant_id: Annotated[UUID, Depends(get_current_tenant_id)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> TelegramWebhookActivationResponse:
+    activated = await TelegramWebhookService(session).activate(
+        user_id=principal.user_id, tenant_id=tenant_id, project_id=project_id
+    )
+    session.add(
+        AuditEvent(
+            actor_user_id=principal.user_id,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            action="telegram.webhook.activated",
+            request_id=get_request_id(),
+            metadata_json={"webhook_url": activated.webhook_url},
+        )
+    )
+    await session.flush()
+    return TelegramWebhookActivationResponse(
+        project_id=activated.project_id,
+        webhook_url=activated.webhook_url,
+        webhook_secret=activated.webhook_secret,
+    )
+
+
+@router.post("/{project_id}/telegram/webhook/deactivate", status_code=status.HTTP_204_NO_CONTENT)
+async def deactivate_telegram_webhook(
+    project_id: UUID,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    tenant_id: Annotated[UUID, Depends(get_current_tenant_id)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    await TelegramWebhookService(session).deactivate(
+        user_id=principal.user_id, tenant_id=tenant_id, project_id=project_id
+    )
+    session.add(
+        AuditEvent(
+            actor_user_id=principal.user_id,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            action="telegram.webhook.deactivated",
+            request_id=get_request_id(),
+            metadata_json={},
+        )
+    )
+    await session.flush()
 
 
 @router.post(
@@ -104,6 +160,9 @@ async def disconnect_telegram_bot(
     tenant_id: Annotated[UUID, Depends(get_current_tenant_id)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
+    await TelegramWebhookService(session).deactivate(
+        user_id=principal.user_id, tenant_id=tenant_id, project_id=project_id
+    )
     await TelegramBotProvisioningService(session).disconnect(
         user_id=principal.user_id, tenant_id=tenant_id, project_id=project_id
     )
