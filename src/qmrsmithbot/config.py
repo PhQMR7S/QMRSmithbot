@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     telegram_worker_poll_seconds: float = Field(default=1.0, ge=0.1, le=30.0)
     telegram_worker_batch_size: int = Field(default=10, ge=1, le=100)
     telegram_worker_lease_seconds: int = Field(default=120, ge=10, le=3600)
+    telegram_worker_handler_timeout_seconds: int = Field(default=90, ge=5, le=1800)
     telegram_worker_max_attempts: int = Field(default=8, ge=1, le=100)
     telegram_worker_shutdown_grace_seconds: int = Field(default=30, ge=1, le=300)
     platform_required_channel: str = ""
@@ -46,6 +47,8 @@ class Settings(BaseSettings):
             raise ValueError("session idle TTL must be shorter than absolute TTL")
         if self.telegram_worker_lease_seconds <= self.telegram_worker_poll_seconds:
             raise ValueError("Telegram worker lease must exceed poll interval")
+        if self.telegram_worker_lease_seconds <= self.telegram_worker_handler_timeout_seconds:
+            raise ValueError("Telegram worker lease must exceed handler timeout")
         if environment == "production":
             if not self.telegram_factory_bot_token.get_secret_value():
                 raise ValueError("TELEGRAM_FACTORY_BOT_TOKEN is required in production")
