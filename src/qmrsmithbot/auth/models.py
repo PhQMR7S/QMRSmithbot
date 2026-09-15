@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
@@ -61,6 +62,17 @@ class Principal:
 
 
 @dataclass(frozen=True, slots=True)
+class SessionInfo:
+    id: UUID
+    created_at: datetime
+    last_seen_at: datetime
+    expires_at: datetime
+    revoked_at: datetime | None
+    user_agent: str | None
+    ip_address: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class TenantMembership:
     tenant_id: UUID
     user_id: int
@@ -89,4 +101,4 @@ class Invitation:
     tenant_id: UUID
     email: str
     role: TenantRole
-    expires_at: object
+    expires_at: datetime
