@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from uuid import UUID
 
 
 class BotStatus(StrEnum):
@@ -12,13 +13,11 @@ class BotStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class BotProject:
-    id: str
+    id: UUID
     owner_id: int
     name: str
-    telegram_username: str | None
-    status: BotStatus
-    active_version: int | None
-    created_at: datetime
+    active_version: int | None = None
+    status: BotStatus = BotStatus.DRAFT
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,7 +28,8 @@ class PlatformAccessPolicy:
 
 @dataclass(frozen=True, slots=True)
 class WorkflowVersion:
-    project_id: str
+    id: UUID
+    project_id: UUID
     version: int
     definition: dict
-    published_at: datetime | None
+    published_at: datetime | None = None
