@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator
+from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,7 +48,7 @@ async def get_current_user_id(
 async def get_project_service(
     session: AsyncSession = Depends(get_session),
 ) -> AsyncIterator[ProjectService]:
-    async def audit(action: str, project_id, owner_id: int) -> None:
+    async def audit(action: str, project_id: UUID, owner_id: int) -> None:
         session.add(
             AuditEvent(
                 actor_user_id=owner_id,
