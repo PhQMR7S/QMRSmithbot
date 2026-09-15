@@ -11,6 +11,7 @@ from qmrsmithbot.config import settings
 from qmrsmithbot.db import (
     models,  # noqa: F401
     telegram_runtime_models,  # noqa: F401
+    workflow_runtime_models,  # noqa: F401
 )
 from qmrsmithbot.db.base import Base
 
