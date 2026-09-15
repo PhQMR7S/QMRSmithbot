@@ -1,19 +1,28 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from qmrsmithbot.auth.models import Principal, Tenant, TenantMembership, TenantRole
+from qmrsmithbot.auth.models import (
+    ROLE_RANK,
+    Principal,
+    Tenant,
+    TenantMember,
+    TenantMembership,
+    TenantRole,
+)
 from qmrsmithbot.config import settings
 from qmrsmithbot.db.models import (
     IdentityRecord,
     SessionRecord,
+    TenantInvitationRecord,
     TenantMembershipRecord,
     TenantRecord,
     User,
@@ -32,6 +41,10 @@ class TenantSelectionRequired(TenantAccessError):
     """Raised when a user belongs to multiple tenants and omitted the tenant context."""
 
 
+class TenantAdministrationError(Exception):
+    """Raised when a tenant administration operation violates a business invariant."""
+
+
 class IdentityService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -44,7 +57,6 @@ class IdentityService:
             user = User(id=user_id)
             self.session.add(user)
             await self.session.flush()
-
         identity = await self.session.scalar(
             select(IdentityRecord).where(
                 IdentityRecord.provider == "development",
@@ -123,6 +135,21 @@ class SessionService:
             record.revoked_at = datetime.now(UTC)
             await self.session.flush()
 
+    async def revoke_all_except(self, *, user_id: int, session_id: UUID) -> int:
+        result = await self.session.execute(
+            select(SessionRecord).where(
+                SessionRecord.user_id == user_id,
+                SessionRecord.id != session_id,
+                SessionRecord.revoked_at.is_(None),
+            )
+        )
+        records = list(result.scalars())
+        now = datetime.now(UTC)
+        for record in records:
+            record.revoked_at = now
+        await self.session.flush()
+        return len(records)
+
     @staticmethod
     def hash_token(raw_token: str) -> str:
         return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
@@ -135,8 +162,24 @@ class SessionService:
 
 
 class TenantService:
+    _slug_pattern = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,118}[a-z0-9])?$")
+
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    @staticmethod
+    def normalize_email(email: str) -> str:
+        normalized = email.strip().casefold()
+        if len(normalized) > 320 or "@" not in normalized:
+            raise TenantAdministrationError("invalid email address")
+        return normalized
+
+    @classmethod
+    def normalize_slug(cls, slug: str) -> str:
+        normalized = slug.strip().lower()
+        if not cls._slug_pattern.fullmatch(normalized):
+            raise TenantAdministrationError("tenant slug must contain only lowercase letters, digits, and hyphens")
+        return normalized
 
     async def ensure_personal_tenant(self, user_id: int) -> Tenant:
         slug = f"personal-{user_id}"
@@ -174,9 +217,7 @@ class TenantService:
                 )
                 await self.session.flush()
         except IntegrityError:
-            existing = await self.session.scalar(
-                select(TenantRecord).where(TenantRecord.slug == slug)
-            )
+            existing = await self.session.scalar(select(TenantRecord).where(TenantRecord.slug == slug))
             if existing is None:
                 raise
             membership = await self.session.scalar(
@@ -236,8 +277,211 @@ class TenantService:
         )
         if record is None:
             return None
-        return TenantMembership(
-            tenant_id=record.tenant_id,
-            user_id=record.user_id,
-            role=TenantRole(record.role),
+        return TenantMembership(tenant_id=record.tenant_id, user_id=record.user_id, role=TenantRole(record.role))
+
+    async def list_tenants(self, user_id: int) -> list[Tenant]:
+        rows = await self.session.execute(
+            select(TenantRecord)
+            .join(TenantMembershipRecord, TenantMembershipRecord.tenant_id == TenantRecord.id)
+            .where(TenantMembershipRecord.user_id == user_id)
+            .order_by(TenantRecord.name)
+        )
+        return [Tenant(id=row.id, name=row.name, slug=row.slug) for row in rows.scalars()]
+
+    async def create_tenant(self, *, user_id: int, name: str, slug: str) -> Tenant:
+        normalized_name = name.strip()
+        normalized_slug = self.normalize_slug(slug)
+        if not normalized_name or len(normalized_name) > 120:
+            raise TenantAdministrationError("tenant name must contain 1-120 characters")
+        tenant = TenantRecord(
+            id=uuid4(), name=normalized_name, slug=normalized_slug, created_by_user_id=user_id
+        )
+        self.session.add(tenant)
+        try:
+            await self.session.flush()
+            self.session.add(
+                TenantMembershipRecord(tenant_id=tenant.id, user_id=user_id, role=TenantRole.OWNER)
+            )
+            await self.session.flush()
+        except IntegrityError as exc:
+            raise TenantAdministrationError("tenant slug is already in use") from exc
+        return Tenant(id=tenant.id, name=tenant.name, slug=tenant.slug)
+
+    async def list_members(self, tenant_id: UUID) -> list[TenantMember]:
+        rows = await self.session.execute(
+            select(TenantMembershipRecord, User, IdentityRecord)
+            .join(User, User.id == TenantMembershipRecord.user_id)
+            .outerjoin(
+                IdentityRecord,
+                (IdentityRecord.user_id == User.id) & IdentityRecord.email_verified.is_(True),
+            )
+            .where(TenantMembershipRecord.tenant_id == tenant_id)
+            .order_by(TenantMembershipRecord.created_at)
+        )
+        members: dict[int, TenantMember] = {}
+        for membership, user, identity in rows:
+            if membership.user_id not in members:
+                members[membership.user_id] = TenantMember(
+                    tenant_id=tenant_id,
+                    user_id=user.id,
+                    role=TenantRole(membership.role),
+                    username=user.username,
+                    email=identity.email if identity else None,
+                )
+        return list(members.values())
+
+    async def create_invitation(
+        self, *, tenant_id: UUID, invited_by_user_id: int, email: str, role: TenantRole
+    ) -> tuple[UUID, str, datetime]:
+        if role == TenantRole.OWNER:
+            raise TenantAdministrationError("owner cannot be assigned through an invitation")
+        normalized_email = self.normalize_email(email)
+        existing_member = await self.session.scalar(
+            select(TenantMembershipRecord)
+            .join(IdentityRecord, IdentityRecord.user_id == TenantMembershipRecord.user_id)
+            .where(
+                TenantMembershipRecord.tenant_id == tenant_id,
+                IdentityRecord.email == normalized_email,
+                IdentityRecord.email_verified.is_(True),
+            )
+        )
+        if existing_member is not None:
+            raise TenantAdministrationError("user is already a tenant member")
+        active = await self.session.scalar(
+            select(TenantInvitationRecord).where(
+                TenantInvitationRecord.tenant_id == tenant_id,
+                TenantInvitationRecord.email == normalized_email,
+                TenantInvitationRecord.accepted_at.is_(None),
+                TenantInvitationRecord.revoked_at.is_(None),
+            )
+        )
+        if active is not None:
+            raise TenantAdministrationError("an active invitation already exists")
+        raw_token = f"qmi_{secrets.token_urlsafe(32)}"
+        expires_at = datetime.now(UTC) + timedelta(days=7)
+        record = TenantInvitationRecord(
+            id=uuid4(),
+            tenant_id=tenant_id,
+            invited_by_user_id=invited_by_user_id,
+            email=normalized_email,
+            role=role.value,
+            token_hash=SessionService.hash_token(raw_token),
+            expires_at=expires_at,
+        )
+        self.session.add(record)
+        await self.session.flush()
+        return record.id, raw_token, expires_at
+
+    async def revoke_invitation(self, *, tenant_id: UUID, invitation_id: UUID) -> None:
+        record = await self.session.scalar(
+            select(TenantInvitationRecord).where(
+                TenantInvitationRecord.id == invitation_id,
+                TenantInvitationRecord.tenant_id == tenant_id,
+                TenantInvitationRecord.accepted_at.is_(None),
+                TenantInvitationRecord.revoked_at.is_(None),
+            )
+        )
+        if record is None:
+            raise TenantAdministrationError("invitation was not found or is no longer active")
+        record.revoked_at = datetime.now(UTC)
+        await self.session.flush()
+
+    async def accept_invitation(self, *, user_id: int, raw_token: str) -> UUID:
+        record = await self.session.scalar(
+            select(TenantInvitationRecord).where(
+                TenantInvitationRecord.token_hash == SessionService.hash_token(raw_token),
+                TenantInvitationRecord.accepted_at.is_(None),
+                TenantInvitationRecord.revoked_at.is_(None),
+                TenantInvitationRecord.expires_at > datetime.now(UTC),
+            )
+        )
+        if record is None:
+            raise TenantAdministrationError("invitation is invalid or expired")
+        verified_users = list(
+            await self.session.scalars(
+                select(IdentityRecord.user_id).where(
+                    IdentityRecord.email == record.email,
+                    IdentityRecord.email_verified.is_(True),
+                ).distinct()
+            )
+        )
+        if verified_users != [user_id]:
+            raise TenantAdministrationError("invitation email does not match the authenticated identity")
+        membership = await self.session.get(
+            TenantMembershipRecord, {"tenant_id": record.tenant_id, "user_id": user_id}
+        )
+        if membership is None:
+            self.session.add(
+                TenantMembershipRecord(
+                    tenant_id=record.tenant_id, user_id=user_id, role=record.role
+                )
+            )
+        record.accepted_at = datetime.now(UTC)
+        await self.session.flush()
+        return record.tenant_id
+
+    async def change_role(
+        self, *, tenant_id: UUID, target_user_id: int, new_role: TenantRole, actor_role: TenantRole
+    ) -> None:
+        membership = await self.session.get(
+            TenantMembershipRecord, {"tenant_id": tenant_id, "user_id": target_user_id}
+        )
+        if membership is None:
+            raise TenantAdministrationError("member was not found")
+        current_role = TenantRole(membership.role)
+        if new_role == current_role:
+            return
+        if new_role == TenantRole.OWNER:
+            raise TenantAdministrationError("owner transfer must use the dedicated ownership transfer operation")
+        if ROLE_RANK[actor_role] <= ROLE_RANK[current_role]:
+            raise TenantAdministrationError("actor cannot change an equal or higher privilege role")
+        if ROLE_RANK[actor_role] <= ROLE_RANK[new_role]:
+            raise TenantAdministrationError("actor cannot grant an equal or higher privilege role")
+        if current_role == TenantRole.OWNER:
+            raise TenantAdministrationError("owner role cannot be changed here")
+        membership.role = new_role.value
+        await self.session.flush()
+
+    async def transfer_ownership(self, *, tenant_id: UUID, current_owner_id: int, new_owner_id: int) -> None:
+        if current_owner_id == new_owner_id:
+            raise TenantAdministrationError("new owner must be a different member")
+        current = await self.session.get(
+            TenantMembershipRecord, {"tenant_id": tenant_id, "user_id": current_owner_id}
+        )
+        target = await self.session.get(
+            TenantMembershipRecord, {"tenant_id": tenant_id, "user_id": new_owner_id}
+        )
+        if current is None or TenantRole(current.role) != TenantRole.OWNER:
+            raise TenantAdministrationError("current actor is not the tenant owner")
+        if target is None:
+            raise TenantAdministrationError("new owner must already be a tenant member")
+        current.role = TenantRole.ADMIN.value
+        target.role = TenantRole.OWNER.value
+        await self.session.flush()
+
+    async def remove_member(self, *, tenant_id: UUID, target_user_id: int, actor_role: TenantRole) -> None:
+        membership = await self.session.get(
+            TenantMembershipRecord, {"tenant_id": tenant_id, "user_id": target_user_id}
+        )
+        if membership is None:
+            raise TenantAdministrationError("member was not found")
+        target_role = TenantRole(membership.role)
+        if target_role == TenantRole.OWNER:
+            raise TenantAdministrationError("owner must transfer ownership before removal")
+        if ROLE_RANK[actor_role] <= ROLE_RANK[target_role]:
+            raise TenantAdministrationError("actor cannot remove an equal or higher privilege member")
+        await self.session.delete(membership)
+        await self.session.flush()
+
+    async def owner_count(self, tenant_id: UUID) -> int:
+        return int(
+            await self.session.scalar(
+                select(func.count())
+                .select_from(TenantMembershipRecord)
+                .where(
+                    TenantMembershipRecord.tenant_id == tenant_id,
+                    TenantMembershipRecord.role == TenantRole.OWNER,
+                )
+            )
+            or 0
         )
