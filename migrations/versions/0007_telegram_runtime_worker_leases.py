@@ -32,9 +32,19 @@ def upgrade() -> None:
         "telegram_update_inbox",
         ["lease_until"],
     )
+    op.create_check_constraint(
+        "ck_telegram_update_inbox_attempts_nonnegative",
+        "telegram_update_inbox",
+        "attempts >= 0",
+    )
 
 
 def downgrade() -> None:
+    op.drop_constraint(
+        "ck_telegram_update_inbox_attempts_nonnegative",
+        "telegram_update_inbox",
+        type_="check",
+    )
     op.drop_index("ix_telegram_update_inbox_lease_until", table_name="telegram_update_inbox")
     op.drop_index("ix_telegram_update_inbox_claimed_by", table_name="telegram_update_inbox")
     op.drop_column("telegram_update_inbox", "lease_until")
