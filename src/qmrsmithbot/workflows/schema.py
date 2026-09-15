@@ -46,7 +46,7 @@ class WorkflowDefinition(BaseModel):
     variables: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def validate_graph(self) -> "WorkflowDefinition":
+    def validate_graph(self) -> WorkflowDefinition:
         ids = [node.id for node in self.nodes]
         if len(ids) != len(set(ids)):
             raise ValueError("workflow node ids must be unique")
