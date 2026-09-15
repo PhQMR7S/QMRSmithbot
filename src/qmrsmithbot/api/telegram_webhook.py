@@ -9,8 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from qmrsmithbot.api.dependencies import get_session
 from qmrsmithbot.db.models import BotProjectRecord
+from qmrsmithbot.db.session import get_session
 from qmrsmithbot.db.telegram_runtime_models import TelegramWebhookStateRecord
 from qmrsmithbot.telegram.queue import TelegramUpdateQueue
 from qmrsmithbot.telegram.webhook import require_telegram_webhook_secret
@@ -44,7 +44,11 @@ async def telegram_webhook(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    await require_telegram_webhook_secret(project_id, session, request.headers.get("X-Telegram-Bot-Api-Secret-Token"))
+    await require_telegram_webhook_secret(
+        project_id,
+        session,
+        request.headers.get("X-Telegram-Bot-Api-Secret-Token"),
+    )
 
     state = await session.scalar(
         select(TelegramWebhookStateRecord).where(
