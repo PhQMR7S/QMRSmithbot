@@ -112,7 +112,10 @@ def test_webhook_state_is_project_scoped() -> None:
     assert TelegramWebhookStateRecord.__table__.c.webhook_url.nullable is False
 
 
-def test_update_inbox_is_idempotent_per_project_and_update() -> None:
+def test_update_inbox_has_idempotency_and_lease_invariants() -> None:
     names = {constraint.name for constraint in TelegramUpdateInboxRecord.__table__.constraints}
     assert "uq_telegram_update_project_update" in names
+    assert "ck_telegram_update_inbox_attempts_nonnegative" in names
     assert TelegramUpdateInboxRecord.__table__.c.payload.nullable is False
+    assert TelegramUpdateInboxRecord.__table__.c.claimed_by.nullable is True
+    assert TelegramUpdateInboxRecord.__table__.c.lease_until.nullable is True
