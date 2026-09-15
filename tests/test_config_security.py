@@ -3,7 +3,6 @@ from pydantic import SecretStr
 
 from qmrsmithbot.config import Settings
 
-
 OIDC_TEST_VALUES = {
     "auth_oidc_enabled": True,
     "auth_oidc_issuer": "https://id.example.com",
