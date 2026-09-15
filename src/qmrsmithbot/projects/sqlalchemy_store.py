@@ -3,11 +3,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmrsmithbot.db.models import BotProjectRecord, WorkflowVersionRecord
-from qmrsmithbot.projects.service import Project, ProjectStore, WorkflowVersion
+from qmrsmithbot.domain.models import BotProject as Project
+from qmrsmithbot.domain.models import BotStatus
+from qmrsmithbot.domain.models import WorkflowVersion
+from qmrsmithbot.projects.service import ProjectStore
 
 
 class SQLAlchemyProjectStore(ProjectStore):
@@ -89,16 +92,11 @@ class SQLAlchemyProjectStore(ProjectStore):
         if version_record is None:
             raise LookupError(f"workflow version {version} was not found")
 
-        await self.session.execute(
-            update(BotProjectRecord)
-            .where(BotProjectRecord.id == project_id)
-            .values(active_version=version, status="running")
-        )
+        project.active_version = version
+        project.status = BotStatus.RUNNING
         if version_record.published_at is None:
             version_record.published_at = datetime.now(UTC)
         await self.session.flush()
-        project.active_version = version
-        project.status = "running"
         return self._project(project)
 
     @staticmethod
@@ -118,5 +116,5 @@ class SQLAlchemyProjectStore(ProjectStore):
             project_id=record.project_id,
             version=record.version,
             definition=record.definition,
-            published=record.published_at is not None,
+            published_at=record.published_at,
         )
