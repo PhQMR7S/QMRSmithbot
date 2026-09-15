@@ -40,14 +40,6 @@ def upgrade() -> None:
         sa.Column("active_version", sa.Integer(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.CheckConstraint(
-            "status IN ('draft', 'running', 'stopped', 'error')",
-            name="ck_bot_projects_status",
-        ),
-        sa.CheckConstraint(
-            "active_version IS NULL OR active_version > 0",
-            name="ck_bot_projects_version",
-        ),
         sa.ForeignKeyConstraint(["owner_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("telegram_bot_id"),
@@ -63,7 +55,6 @@ def upgrade() -> None:
         sa.Column("definition", postgresql.JSONB(), nullable=False),
         sa.Column("published_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.CheckConstraint("version > 0", name="ck_workflow_versions_version_positive"),
         sa.ForeignKeyConstraint(["project_id"], ["bot_projects.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("project_id", "version", name="uq_workflow_project_version"),
