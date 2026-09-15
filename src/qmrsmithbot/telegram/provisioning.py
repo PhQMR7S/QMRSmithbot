@@ -61,6 +61,17 @@ def verify_webhook_secret(raw_secret: str, stored_hash: str) -> bool:
     return hmac.compare_digest(hash_webhook_secret(raw_secret), stored_hash)
 
 
+def decrypt_bot_token(token_ciphertext: str) -> str:
+    try:
+        plaintext = _credential_cipher().decrypt(token_ciphertext.encode("ascii"))
+    except Exception as exc:
+        raise TelegramProvisioningError("unable to decrypt Telegram bot credential") from exc
+    try:
+        return plaintext.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise TelegramProvisioningError("invalid encrypted Telegram bot credential") from exc
+
+
 class TelegramBotProvisioningService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
