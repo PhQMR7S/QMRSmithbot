@@ -39,6 +39,9 @@ class ProjectStore:
     async def get_version(self, project_id: UUID, version: int) -> WorkflowVersion | None:
         raise NotImplementedError
 
+    async def list_versions(self, project_id: UUID) -> list[WorkflowVersion]:
+        raise NotImplementedError
+
     async def activate_version(self, project_id: UUID, version: int) -> Project:
         """Atomically switch the project's active version."""
         raise NotImplementedError
@@ -63,6 +66,14 @@ class ProjectService:
             Project(id=uuid4(), owner_id=owner_id, name=normalized_name)
         )
 
+    async def get_project(self, *, project_id: UUID, owner_id: int) -> Project:
+        self._require_positive_owner(owner_id)
+        return self._require_owner(await self.store.get_project_for_owner(project_id, owner_id))
+
+    async def list_versions(self, *, project_id: UUID, owner_id: int) -> list[WorkflowVersion]:
+        await self.get_project(project_id=project_id, owner_id=owner_id)
+        return await self.store.list_versions(project_id)
+
     async def save_version(
         self,
         *,
@@ -70,7 +81,7 @@ class ProjectService:
         owner_id: int,
         definition: dict,
     ) -> WorkflowVersion:
-        self._require_owner(await self.store.get_project_for_owner(project_id, owner_id))
+        await self.get_project(project_id=project_id, owner_id=owner_id)
         workflow = self._validate_definition(definition)
         return await self.store.create_next_version(
             project_id,
@@ -85,10 +96,8 @@ class ProjectService:
         owner_id: int,
         version: int,
     ) -> Project:
-        self._require_owner(await self.store.get_project_for_owner(project_id, owner_id))
-        stored = await self.store.get_version(project_id, version)
-        if stored is None:
-            raise VersionNotFoundError(f"workflow version {version} was not found")
+        await self.get_project(project_id=project_id, owner_id=owner_id)
+        stored = self._require_version(await self.store.get_version(project_id, version), version)
         self._validate_definition(stored.definition)
 
         project = await self.store.activate_version(project_id, version)
@@ -102,10 +111,8 @@ class ProjectService:
         owner_id: int,
         version: int,
     ) -> Project:
-        self._require_owner(await self.store.get_project_for_owner(project_id, owner_id))
-        stored = await self.store.get_version(project_id, version)
-        if stored is None:
-            raise VersionNotFoundError(f"workflow version {version} was not found")
+        await self.get_project(project_id=project_id, owner_id=owner_id)
+        stored = self._require_version(await self.store.get_version(project_id, version), version)
         self._validate_definition(stored.definition)
 
         project = await self.store.activate_version(project_id, version)
@@ -124,7 +131,18 @@ class ProjectService:
             raise InvalidWorkflowError(str(exc)) from exc
 
     @staticmethod
+    def _require_positive_owner(owner_id: int) -> None:
+        if owner_id <= 0:
+            raise ValueError("owner id must be positive")
+
+    @staticmethod
     def _require_owner(project: Project | None) -> Project:
         if project is None:
             raise ProjectNotFoundError("project was not found")
         return project
+
+    @staticmethod
+    def _require_version(version: WorkflowVersion | None, version_number: int) -> WorkflowVersion:
+        if version is None:
+            raise VersionNotFoundError(f"workflow version {version_number} was not found")
+        return version
