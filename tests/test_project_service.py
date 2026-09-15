@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -50,13 +51,15 @@ class FakeProjectStore:
         updated = Project(project.id, project.owner_id, project.name, version)
         self.projects[project_id] = updated
         stored = self.versions[(project_id, version)]
-        self.versions[(project_id, version)] = WorkflowVersion(
-            stored.id,
-            stored.project_id,
-            stored.version,
-            stored.definition,
-            stored.published_at,
-        )
+        if stored.published_at is None:
+            stored = WorkflowVersion(
+                stored.id,
+                stored.project_id,
+                stored.version,
+                stored.definition,
+                datetime.now(UTC),
+            )
+            self.versions[(project_id, version)] = stored
         return updated
 
 
