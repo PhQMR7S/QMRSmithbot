@@ -54,7 +54,7 @@ def _credential_cipher() -> Fernet:
 
 
 def hash_webhook_secret(secret: str) -> str:
-    return hashlib.sha256(secret.encode("utf-8")).hexdigest()
+    return hashlib.sha256(secret.encode()).hexdigest()
 
 
 def verify_webhook_secret(raw_secret: str, stored_hash: str) -> bool:
@@ -127,7 +127,7 @@ class TelegramBotProvisioningService:
         )
         cipher = _credential_cipher()
         webhook_secret = secrets.token_urlsafe(32)
-        encrypted_token = cipher.encrypt(token.encode("utf-8")).decode("ascii")
+        encrypted_token = cipher.encrypt(token.encode()).decode("ascii")
 
         try:
             async with self.session.begin_nested():
