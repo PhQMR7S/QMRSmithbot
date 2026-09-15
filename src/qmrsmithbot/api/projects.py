@@ -5,25 +5,37 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 
-from qmrsmithbot.api.dependencies import get_current_user_id, get_project_service
+from qmrsmithbot.api.dependencies import (
+    get_authorization_service,
+    get_current_principal,
+    get_current_tenant_id,
+    get_project_service,
+)
 from qmrsmithbot.api.schemas import (
     ProjectCreateRequest,
     ProjectResponse,
     WorkflowVersionCreateRequest,
     WorkflowVersionResponse,
 )
+from qmrsmithbot.auth.authorization import AuthorizationService
+from qmrsmithbot.auth.models import Permission, Principal
 from qmrsmithbot.domain.models import BotProject, WorkflowVersion
 from qmrsmithbot.projects.service import ProjectService
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
-CurrentUserId = Annotated[int, Depends(get_current_user_id)]
+CurrentPrincipal = Annotated[Principal, Depends(get_current_principal)]
+CurrentTenantId = Annotated[UUID, Depends(get_current_tenant_id)]
+AuthorizationDependency = Annotated[AuthorizationService, Depends(get_authorization_service)]
 ProjectServiceDependency = Annotated[ProjectService, Depends(get_project_service)]
 
 
 def project_response(project: BotProject) -> ProjectResponse:
+    if project.tenant_id is None:
+        raise RuntimeError("project is missing tenant scope")
     return ProjectResponse(
         id=project.id,
         owner_id=project.owner_id,
+        tenant_id=project.tenant_id,
         name=project.name,
         active_version=project.active_version,
         status=project.status,
@@ -43,30 +55,47 @@ def version_response(version: WorkflowVersion) -> WorkflowVersionResponse:
 @router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 async def create_project(
     payload: ProjectCreateRequest,
-    owner_id: CurrentUserId,
+    principal: CurrentPrincipal,
+    tenant_id: CurrentTenantId,
+    authorization: AuthorizationDependency,
     service: ProjectServiceDependency,
 ) -> ProjectResponse:
-    project = await service.create_project(owner_id=owner_id, name=payload.name)
+    await authorization.require_permission(
+        user_id=principal.user_id, tenant_id=tenant_id, permission=Permission.PROJECT_WRITE
+    )
+    project = await service.create_project(
+        owner_id=principal.user_id, tenant_id=tenant_id, name=payload.name
+    )
     return project_response(project)
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
 async def get_project(
     project_id: UUID,
-    owner_id: CurrentUserId,
+    principal: CurrentPrincipal,
+    tenant_id: CurrentTenantId,
+    authorization: AuthorizationDependency,
     service: ProjectServiceDependency,
 ) -> ProjectResponse:
-    project = await service.get_project(project_id=project_id, owner_id=owner_id)
+    await authorization.require_permission(
+        user_id=principal.user_id, tenant_id=tenant_id, permission=Permission.PROJECT_READ
+    )
+    project = await service.get_project(project_id=project_id, tenant_id=tenant_id)
     return project_response(project)
 
 
 @router.get("/{project_id}/versions", response_model=list[WorkflowVersionResponse])
 async def list_workflow_versions(
     project_id: UUID,
-    owner_id: CurrentUserId,
+    principal: CurrentPrincipal,
+    tenant_id: CurrentTenantId,
+    authorization: AuthorizationDependency,
     service: ProjectServiceDependency,
 ) -> list[WorkflowVersionResponse]:
-    versions = await service.list_versions(project_id=project_id, owner_id=owner_id)
+    await authorization.require_permission(
+        user_id=principal.user_id, tenant_id=tenant_id, permission=Permission.PROJECT_READ
+    )
+    versions = await service.list_versions(project_id=project_id, tenant_id=tenant_id)
     return [version_response(version) for version in versions]
 
 
@@ -78,13 +107,16 @@ async def list_workflow_versions(
 async def save_workflow_version(
     project_id: UUID,
     payload: WorkflowVersionCreateRequest,
-    owner_id: CurrentUserId,
+    principal: CurrentPrincipal,
+    tenant_id: CurrentTenantId,
+    authorization: AuthorizationDependency,
     service: ProjectServiceDependency,
 ) -> WorkflowVersionResponse:
+    await authorization.require_permission(
+        user_id=principal.user_id, tenant_id=tenant_id, permission=Permission.PROJECT_WRITE
+    )
     version = await service.save_version(
-        project_id=project_id,
-        owner_id=owner_id,
-        definition=payload.definition,
+        project_id=project_id, tenant_id=tenant_id, definition=payload.definition
     )
     return version_response(version)
 
@@ -93,10 +125,20 @@ async def save_workflow_version(
 async def publish_workflow(
     project_id: UUID,
     version: int,
-    owner_id: CurrentUserId,
+    principal: CurrentPrincipal,
+    tenant_id: CurrentTenantId,
+    authorization: AuthorizationDependency,
     service: ProjectServiceDependency,
 ) -> ProjectResponse:
-    project = await service.publish(project_id=project_id, owner_id=owner_id, version=version)
+    await authorization.require_permission(
+        user_id=principal.user_id, tenant_id=tenant_id, permission=Permission.PROJECT_PUBLISH
+    )
+    project = await service.publish(
+        project_id=project_id,
+        tenant_id=tenant_id,
+        actor_user_id=principal.user_id,
+        version=version,
+    )
     return project_response(project)
 
 
@@ -104,8 +146,18 @@ async def publish_workflow(
 async def rollback_workflow(
     project_id: UUID,
     version: int,
-    owner_id: CurrentUserId,
+    principal: CurrentPrincipal,
+    tenant_id: CurrentTenantId,
+    authorization: AuthorizationDependency,
     service: ProjectServiceDependency,
 ) -> ProjectResponse:
-    project = await service.rollback(project_id=project_id, owner_id=owner_id, version=version)
+    await authorization.require_permission(
+        user_id=principal.user_id, tenant_id=tenant_id, permission=Permission.PROJECT_PUBLISH
+    )
+    project = await service.rollback(
+        project_id=project_id,
+        tenant_id=tenant_id,
+        actor_user_id=principal.user_id,
+        version=version,
+    )
     return project_response(project)

@@ -16,6 +16,7 @@ class BotProject:
     id: UUID
     owner_id: int
     name: str
+    tenant_id: UUID | None = None
     active_version: int | None = None
     status: BotStatus = BotStatus.DRAFT
 
