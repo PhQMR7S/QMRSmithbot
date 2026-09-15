@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,11 +10,29 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     database_url: str = "postgresql+asyncpg://qmrsmith:qmrsmith@localhost:5432/qmrsmith"
     redis_url: str = "redis://localhost:6379/0"
-    telegram_factory_bot_token: str = ""
+    telegram_factory_bot_token: SecretStr = SecretStr("")
     platform_required_channel: str = ""
     platform_required_channel_enabled: bool = False
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
+
+    @model_validator(mode="after")
+    def validate_environment(self) -> "Settings":
+        environment = self.app_env.strip().lower()
+        if environment not in {"development", "test", "staging", "production"}:
+            raise ValueError("app_env must be development, test, staging, or production")
+
+        if environment == "production":
+            if not self.telegram_factory_bot_token.get_secret_value():
+                raise ValueError("TELEGRAM_FACTORY_BOT_TOKEN is required in production")
+            if self.database_url == "postgresql+asyncpg://qmrsmith:qmrsmith@localhost:5432/qmrsmith":
+                raise ValueError("DATABASE_URL must be explicitly configured in production")
+
+        if self.platform_required_channel_enabled and not self.platform_required_channel.strip():
+            raise ValueError(
+                "PLATFORM_REQUIRED_CHANNEL is required when platform access protection is enabled"
+            )
+        return self
 
 
 @lru_cache(maxsize=1)
