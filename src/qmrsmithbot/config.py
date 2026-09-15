@@ -1,5 +1,7 @@
 from functools import lru_cache
+from urllib.parse import urlparse
 
+from cryptography.fernet import Fernet
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -46,6 +48,16 @@ class Settings(BaseSettings):
             missing = [name for name, value in required.items() if not value.strip()]
             if missing:
                 raise ValueError(f"OIDC configuration is incomplete: {', '.join(missing)}")
+            issuer = urlparse(self.auth_oidc_issuer)
+            redirect = urlparse(self.auth_oidc_redirect_uri)
+            if issuer.scheme != "https" or not issuer.netloc:
+                raise ValueError("AUTH_OIDC_ISSUER must be an HTTPS URL")
+            if redirect.scheme != "https" or not redirect.netloc:
+                raise ValueError("AUTH_OIDC_REDIRECT_URI must be an HTTPS URL")
+            try:
+                Fernet(self.auth_state_encryption_key.get_secret_value().encode("ascii"))
+            except (ValueError, TypeError) as exc:
+                raise ValueError("AUTH_STATE_ENCRYPTION_KEY must be a valid Fernet key") from exc
         if environment == "production":
             if not self.telegram_factory_bot_token.get_secret_value():
                 raise ValueError("TELEGRAM_FACTORY_BOT_TOKEN is required in production")
