@@ -12,9 +12,10 @@ A future worker will consume the durable inbox and invoke the workflow runtime. 
 
 - The webhook URL is generated server-side from the configured HTTPS base URL and project UUID.
 - The bot token is decrypted only inside the Telegram API client context and is never returned or logged.
-- `setWebhook` uses Telegram's secret-token header, explicit bounded client timeout, `allowed_updates=[]`, and `drop_pending_updates=false` so activation does not intentionally discard queued updates.
+- `setWebhook` uses Telegram's secret-token header, an explicit bounded client timeout, `allowed_updates=[]`, and `drop_pending_updates=false` so activation does not intentionally discard queued updates.
 - Registration is verified with `getWebhookInfo` before the database transaction is allowed to complete.
 - Disconnect first removes and verifies the remote webhook, then removes local credentials.
+- Re-activation generates a fresh secret and verifies the remote URL again instead of trusting stale local state.
 
 ## Verification and replay protection
 
@@ -27,6 +28,8 @@ A future worker will consume the durable inbox and invoke the workflow runtime. 
 ## Queue boundary
 
 The inbox is a PostgreSQL-backed durable boundary rather than an in-memory queue. This prevents accepted updates from disappearing when an API process restarts. The worker/dispatcher is intentionally deferred until the transport contract is proven.
+
+The enqueue operation is deliberately atomic at the database level; the HTTP layer does not acknowledge an update until the database operation has succeeded.
 
 ## Lifecycle and shutdown
 
