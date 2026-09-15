@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     platform_required_channel: str = ""
     platform_required_channel_enabled: bool = False
     auth_dev_bootstrap_enabled: bool = True
+    auth_oidc_enabled: bool = False
+    auth_oidc_issuer: str = ""
+    auth_oidc_client_id: str = ""
+    auth_oidc_client_secret: SecretStr = SecretStr("")
+    auth_oidc_redirect_uri: str = ""
+    auth_state_encryption_key: SecretStr = SecretStr("")
     session_absolute_ttl_minutes: int = Field(default=480, ge=5, le=10080)
     session_idle_ttl_minutes: int = Field(default=30, ge=5, le=1440)
     rate_limit_enabled: bool = False
@@ -29,6 +35,17 @@ class Settings(BaseSettings):
             raise ValueError("app_env must be development, test, staging, or production")
         if self.session_idle_ttl_minutes >= self.session_absolute_ttl_minutes:
             raise ValueError("session idle TTL must be shorter than absolute TTL")
+        if self.auth_oidc_enabled:
+            required = {
+                "AUTH_OIDC_ISSUER": self.auth_oidc_issuer,
+                "AUTH_OIDC_CLIENT_ID": self.auth_oidc_client_id,
+                "AUTH_OIDC_CLIENT_SECRET": self.auth_oidc_client_secret.get_secret_value(),
+                "AUTH_OIDC_REDIRECT_URI": self.auth_oidc_redirect_uri,
+                "AUTH_STATE_ENCRYPTION_KEY": self.auth_state_encryption_key.get_secret_value(),
+            }
+            missing = [name for name, value in required.items() if not value.strip()]
+            if missing:
+                raise ValueError(f"OIDC configuration is incomplete: {', '.join(missing)}")
         if environment == "production":
             if not self.telegram_factory_bot_token.get_secret_value():
                 raise ValueError("TELEGRAM_FACTORY_BOT_TOKEN is required in production")
@@ -38,6 +55,8 @@ class Settings(BaseSettings):
                 raise ValueError("DATABASE_URL must be explicitly configured in production")
             if self.auth_dev_bootstrap_enabled:
                 raise ValueError("AUTH_DEV_BOOTSTRAP_ENABLED must be false in production")
+            if not self.auth_oidc_enabled:
+                raise ValueError("AUTH_OIDC_ENABLED must be true in production")
             if not self.rate_limit_enabled:
                 raise ValueError("RATE_LIMIT_ENABLED must be true in production")
         if self.platform_required_channel_enabled and not self.platform_required_channel.strip():
