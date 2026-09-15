@@ -107,7 +107,6 @@ async def test_publish_and_rollback_are_audited() -> None:
     store = FakeProjectStore()
     project = Project(uuid4(), 42, "My Bot")
     await store.create_project(project)
-    service = ProjectService(store)
     events: list[str] = []
 
     async def audit(action: str, project_id: UUID, owner_id: int) -> None:
