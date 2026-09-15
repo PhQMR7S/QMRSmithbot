@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
-from qmrsmithbot.telegram.dispatcher import DispatchPlan
-from qmrsmithbot.workflows.schema import WorkflowNode
+from qmrsmithbot.workflows.schema import WorkflowDefinition, WorkflowNode
 
 
 @dataclass(slots=True)
@@ -13,6 +12,13 @@ class ExecutionContext:
     values: dict[str, Any] = field(default_factory=dict)
     visited: list[str] = field(default_factory=list)
     steps: int = 0
+
+
+class DispatchPlanLike(Protocol):
+    """Transport-neutral shape consumed by the workflow executor."""
+
+    definition: WorkflowDefinition
+    triggers: tuple[Any, ...]
 
 
 Handler = Callable[[WorkflowNode, ExecutionContext], Awaitable[None]]
@@ -37,16 +43,16 @@ class WorkflowExecutor:
 
     async def run(
         self,
-        plan: DispatchPlan,
+        workflow: WorkflowDefinition | DispatchPlanLike,
         context: ExecutionContext | None = None,
     ) -> ExecutionContext:
         execution = context or ExecutionContext()
-        nodes = {node.id: node for node in plan.definition.nodes}
+        definition, matched = self._resolve_input(workflow)
+        nodes = {node.id: node for node in definition.nodes}
         outgoing: dict[str, list[tuple[str, str | None]]] = {}
-        for edge in plan.definition.edges:
+        for edge in definition.edges:
             outgoing.setdefault(edge.source, []).append((edge.target, edge.condition))
 
-        matched = {trigger.node_id for trigger in plan.triggers}
         queue = list(matched)
         while queue:
             node_id = queue.pop(0)
@@ -72,17 +78,26 @@ class WorkflowExecutor:
         return execution
 
     @staticmethod
+    def _resolve_input(
+        workflow: WorkflowDefinition | DispatchPlanLike,
+    ) -> tuple[WorkflowDefinition, list[str]]:
+        if isinstance(workflow, WorkflowDefinition):
+            return workflow, [node.id for node in workflow.nodes if node.type.startswith("trigger.")]
+        return workflow.definition, [trigger.node_id for trigger in workflow.triggers]
+
+    @staticmethod
     def _condition_matches(condition: str | None, values: dict[str, Any]) -> bool:
         if condition is None or not condition.strip():
             return True
         expression = condition.strip()
         if expression.startswith("exists:"):
             key = expression[7:].strip()
-            return key in values
+            return bool(key) and key in values
         if expression.startswith("equals:"):
             body = expression[7:]
             if "=" not in body:
                 return False
             key, expected = body.split("=", 1)
-            return str(values.get(key.strip(), "")) == expected.strip()
+            key = key.strip()
+            return bool(key) and str(values.get(key, "")) == expected.strip()
         return False
