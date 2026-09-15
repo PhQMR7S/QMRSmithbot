@@ -114,6 +114,7 @@ class TelegramUpdateQueue:
         claim_token: str,
         error: str,
         retry_delay_seconds: int,
+        terminal: bool = False,
     ) -> bool:
         safe_error = error[:500]
         now = datetime.now(UTC)
@@ -128,7 +129,7 @@ class TelegramUpdateQueue:
         )
         if row is None:
             return False
-        terminal = row.attempts >= settings.telegram_worker_max_attempts
+        terminal = terminal or row.attempts >= settings.telegram_worker_max_attempts
         row.status = "failed" if terminal else "queued"
         row.available_at = now + timedelta(seconds=max(0, retry_delay_seconds))
         row.claimed_by = None
