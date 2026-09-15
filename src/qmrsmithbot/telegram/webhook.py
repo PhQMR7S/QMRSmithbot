@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hmac
 from typing import Annotated
 from uuid import UUID
 
@@ -17,7 +16,7 @@ async def require_telegram_webhook_secret(
     session: AsyncSession,
     secret_token: Annotated[str | None, Header(alias="X-Telegram-Bot-Api-Secret-Token")] = None,
 ) -> None:
-    if not secret_token or len(secret_token) > 512:
+    if not secret_token or len(secret_token) > 256:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid webhook secret")
     stored_hash = await session.scalar(
         select(BotCredentialRecord.webhook_secret_hash).where(
@@ -26,7 +25,3 @@ async def require_telegram_webhook_secret(
     )
     if stored_hash is None or not verify_webhook_secret(secret_token, stored_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid webhook secret")
-
-
-def constant_time_equal(left: str, right: str) -> bool:
-    return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
