@@ -52,7 +52,7 @@ class SessionRecord(Base):
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -66,7 +66,7 @@ class TenantRecord(Base):
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    slug: Mapped[str] = mapped_column(String(120), unique=True, index=True, nullable=False)
+    slug: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     created_by_user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
@@ -83,7 +83,6 @@ class TenantMembershipRecord(Base):
             "role IN ('owner', 'admin', 'editor', 'viewer')",
             name="ck_tenant_memberships_role",
         ),
-        UniqueConstraint("tenant_id", "user_id", name="uq_tenant_membership"),
     )
 
     tenant_id: Mapped[UUID] = mapped_column(

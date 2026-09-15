@@ -46,10 +46,9 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("token_hash"),
+        sa.UniqueConstraint("token_hash", name="uq_session_token_hash"),
     )
     op.create_index("ix_sessions_user_id", "sessions", ["user_id"])
-    op.create_index("ix_sessions_token_hash", "sessions", ["token_hash"])
 
     op.create_table(
         "tenants",
@@ -61,9 +60,8 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("slug"),
+        sa.UniqueConstraint("slug", name="uq_tenant_slug"),
     )
-    op.create_index("ix_tenants_slug", "tenants", ["slug"])
     op.create_index("ix_tenants_created_by_user_id", "tenants", ["created_by_user_id"])
 
     op.create_table(
@@ -80,7 +78,6 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("tenant_id", "user_id"),
-        sa.UniqueConstraint("tenant_id", "user_id", name="uq_tenant_membership"),
     )
     op.create_index("ix_tenant_memberships_user_id", "tenant_memberships", ["user_id"])
 
@@ -166,9 +163,7 @@ def downgrade() -> None:
     op.drop_index("ix_tenant_memberships_user_id", table_name="tenant_memberships")
     op.drop_table("tenant_memberships")
     op.drop_index("ix_tenants_created_by_user_id", table_name="tenants")
-    op.drop_index("ix_tenants_slug", table_name="tenants")
     op.drop_table("tenants")
-    op.drop_index("ix_sessions_token_hash", table_name="sessions")
     op.drop_index("ix_sessions_user_id", table_name="sessions")
     op.drop_table("sessions")
     op.drop_index("ix_identities_user_id", table_name="identities")

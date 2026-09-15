@@ -35,7 +35,6 @@ def test_session_token_hash_is_unique() -> None:
 def test_tenant_membership_has_role_invariant() -> None:
     names = {constraint.name for constraint in TenantMembershipRecord.__table__.constraints}
     assert "ck_tenant_memberships_role" in names
-    assert "uq_tenant_membership" in names
 
 
 def test_project_is_tenant_scoped() -> None:
