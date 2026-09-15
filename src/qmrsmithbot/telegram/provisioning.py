@@ -94,13 +94,14 @@ class TelegramBotProvisioningService:
 
         # Do not hold a project row lock while making a network request to Telegram.
         await self.session.rollback()
+        bot: Bot | None = None
         try:
             bot = Bot(token=token)
             me = await bot.get_me()
         except Exception as exc:
             raise TelegramBotTokenInvalid("Telegram rejected the bot token") from exc
         finally:
-            if "bot" in locals():
+            if bot is not None:
                 await bot.session.close()
 
         project = await self.session.scalar(
