@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from qmrsmithbot.config import settings
 from qmrsmithbot.db import models  # noqa: F401
+from qmrsmithbot.db import telegram_runtime_models  # noqa: F401
 from qmrsmithbot.db.base import Base
 
 config = context.config
@@ -22,7 +23,6 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        compare_type=True,
     )
     with context.begin_transaction():
         context.run_migrations()
