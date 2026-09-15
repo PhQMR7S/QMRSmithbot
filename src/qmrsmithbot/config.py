@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://qmrsmith:qmrsmith@localhost:5432/qmrsmith"
     redis_url: str = "redis://localhost:6379/0"
     telegram_factory_bot_token: SecretStr = SecretStr("")
+    telegram_credential_encryption_key: SecretStr = SecretStr("")
+    telegram_webhook_base_url: str = ""
     platform_required_channel: str = ""
     platform_required_channel_enabled: bool = False
     auth_dev_bootstrap_enabled: bool = True
@@ -40,6 +42,10 @@ class Settings(BaseSettings):
         if environment == "production":
             if not self.telegram_factory_bot_token.get_secret_value():
                 raise ValueError("TELEGRAM_FACTORY_BOT_TOKEN is required in production")
+            if not self.telegram_credential_encryption_key.get_secret_value().strip():
+                raise ValueError("TELEGRAM_CREDENTIAL_ENCRYPTION_KEY is required in production")
+            if not self.telegram_webhook_base_url.strip():
+                raise ValueError("TELEGRAM_WEBHOOK_BASE_URL is required in production")
             if self.database_url == (
                 "postgresql+asyncpg://qmrsmith:qmrsmith@localhost:5432/qmrsmith"
             ):
@@ -50,6 +56,19 @@ class Settings(BaseSettings):
                 raise ValueError("RATE_LIMIT_ENABLED must be true in production")
             if not self.auth_oidc_enabled:
                 raise ValueError("AUTH_OIDC_ENABLED must be true in production")
+        if self.telegram_credential_encryption_key.get_secret_value().strip():
+            try:
+                Fernet(
+                    self.telegram_credential_encryption_key.get_secret_value().encode("ascii")
+                )
+            except (ValueError, TypeError) as exc:
+                raise ValueError(
+                    "TELEGRAM_CREDENTIAL_ENCRYPTION_KEY must be a valid Fernet key"
+                ) from exc
+        if self.telegram_webhook_base_url.strip():
+            webhook_base = urlparse(self.telegram_webhook_base_url)
+            if webhook_base.scheme != "https" or not webhook_base.netloc:
+                raise ValueError("TELEGRAM_WEBHOOK_BASE_URL must be an HTTPS URL")
         if self.auth_oidc_enabled:
             required = {
                 "AUTH_OIDC_ISSUER": self.auth_oidc_issuer,
