@@ -1,18 +1,20 @@
-"""Initial persistence schema.
+"""Create the initial QMRSmithbot persistence schema.
 
 Revision ID: 0001_initial_schema
 Revises:
 Create Date: 2026-09-15
 """
 
+from collections.abc import Sequence
+
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0001_initial_schema"
-down_revision = None
-branch_labels = None
-depends_on = None
+revision: str = "0001_initial_schema"
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -34,7 +36,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(length=120), nullable=False),
         sa.Column("telegram_bot_id", sa.BigInteger(), nullable=True),
         sa.Column("telegram_username", sa.String(length=255), nullable=True),
-        sa.Column("status", sa.String(length=32), nullable=False),
+        sa.Column("status", sa.String(length=32), nullable=False, server_default="draft"),
         sa.Column("active_version", sa.Integer(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
@@ -65,7 +67,12 @@ def upgrade() -> None:
         sa.Column("actor_user_id", sa.BigInteger(), nullable=True),
         sa.Column("project_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("action", sa.String(length=120), nullable=False),
-        sa.Column("metadata_json", postgresql.JSONB(), nullable=False),
+        sa.Column(
+            "metadata_json",
+            postgresql.JSONB(),
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
+        ),
         sa.Column("request_id", sa.String(length=128), nullable=True),
         sa.Column("detail", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
@@ -85,10 +92,8 @@ def downgrade() -> None:
     op.drop_index("ix_audit_events_project_id", table_name="audit_events")
     op.drop_index("ix_audit_events_actor_user_id", table_name="audit_events")
     op.drop_table("audit_events")
-
     op.drop_index("ix_workflow_versions_project_id", table_name="workflow_versions")
     op.drop_table("workflow_versions")
-
     op.drop_index("ix_bot_projects_telegram_username", table_name="bot_projects")
     op.drop_index("ix_bot_projects_owner_id", table_name="bot_projects")
     op.drop_table("bot_projects")
