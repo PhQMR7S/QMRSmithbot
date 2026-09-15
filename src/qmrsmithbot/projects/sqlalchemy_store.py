@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import func, select, update
@@ -95,7 +95,7 @@ class SQLAlchemyProjectStore(ProjectStore):
             .values(active_version=version, status="running")
         )
         if version_record.published_at is None:
-            version_record.published_at = datetime.now(timezone.utc)
+            version_record.published_at = datetime.now(UTC)
         await self.session.flush()
         project.active_version = version
         project.status = "running"
