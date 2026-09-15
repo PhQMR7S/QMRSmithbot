@@ -2,13 +2,13 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from qmrsmithbot.domain.models import WorkflowVersion
 from qmrsmithbot.projects.service import (
     InvalidWorkflowError,
     Project,
     ProjectNotFoundError,
     ProjectService,
     VersionNotFoundError,
-    WorkflowVersion,
 )
 
 
@@ -48,11 +48,18 @@ class FakeProjectStore:
 
     async def activate_version(self, project_id: UUID, version: int) -> Project:
         project = self.projects[project_id]
-        updated = Project(project.id, project.owner_id, project.name, version, "running")
+        updated = Project(project.id, project.owner_id, project.name, version)
         self.projects[project_id] = updated
         stored = self.versions[(project_id, version)]
         self.versions[(project_id, version)] = WorkflowVersion(
-            stored.id, stored.project_id, stored.version, stored.definition, True
+            stored.id, stored.project_id, stored.version, stored.definition, stored.published_at
+        )
+        self.versions[(project_id, version)] = WorkflowVersion(
+            stored.id,
+            stored.project_id,
+            stored.version,
+            stored.definition,
+            stored.published_at,
         )
         return updated
 
@@ -116,11 +123,11 @@ async def test_publish_and_rollback_are_audited() -> None:
 
     published = await service.publish(project_id=project.id, owner_id=42, version=second.version)
     assert published.active_version == 2
-    assert store.versions[(project.id, 2)].published
+    assert store.versions[(project.id, 2)].published_at is not None
 
     rolled_back = await service.rollback(project_id=project.id, owner_id=42, version=first.version)
     assert rolled_back.active_version == 1
-    assert store.versions[(project.id, 1)].published
+    assert store.versions[(project.id, 1)].published_at is not None
     assert events[0].startswith("project.publish:")
     assert events[1].startswith("project.rollback:")
 
@@ -133,3 +140,10 @@ async def test_publish_rejects_missing_version() -> None:
 
     with pytest.raises(VersionNotFoundError):
         await service.publish(project_id=project.id, owner_id=42, version=99)
+
+
+async def test_create_project_rejects_non_positive_owner() -> None:
+    service = ProjectService(FakeProjectStore())
+
+    with pytest.raises(ValueError, match="owner id must be positive"):
+        await service.create_project(owner_id=0, name="My Bot")
