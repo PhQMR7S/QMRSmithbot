@@ -112,7 +112,7 @@ class TelegramWebhookService:
 
     async def deactivate(self, *, user_id: int, tenant_id: UUID, project_id: UUID) -> None:
         await AuthorizationService(self.session).require_permission(
-            user_id=user_id, tenant_id=tenant_id, project_id=project_id, permission=Permission.PROJECT_WRITE
+            user_id=user_id, tenant_id=tenant_id, permission=Permission.PROJECT_WRITE
         )
         project = await self.session.scalar(
             select(BotProjectRecord)
