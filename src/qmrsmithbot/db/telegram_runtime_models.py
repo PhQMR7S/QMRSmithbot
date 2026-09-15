@@ -50,6 +50,7 @@ class TelegramUpdateInboxRecord(Base):
             "status IN ('queued', 'processing', 'completed', 'failed')",
             name="ck_telegram_update_inbox_status",
         ),
+        CheckConstraint("attempts >= 0", name="ck_telegram_update_inbox_attempts_nonnegative"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -61,11 +62,11 @@ class TelegramUpdateInboxRecord(Base):
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    received_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     available_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
+        DateTime(timezone=True), server_default=func.now(), index=True
     )
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(String(500))
+    claimed_by: Mapped[str | None] = mapped_column(String(64), index=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
