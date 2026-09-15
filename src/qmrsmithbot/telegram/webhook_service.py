@@ -19,11 +19,11 @@ from qmrsmithbot.telegram.provisioning import hash_webhook_secret
 
 
 class TelegramWebhookError(RuntimeError):
-    pass
+    """Base error for Telegram webhook lifecycle operations."""
 
 
 class TelegramWebhookNotReady(TelegramWebhookError):
-    pass
+    """Raised when a project cannot safely activate or deactivate its webhook."""
 
 
 @dataclass(frozen=True, slots=True)
