@@ -15,9 +15,7 @@ from qmrsmithbot.projects.sqlalchemy_store import SQLAlchemyProjectStore
 
 
 async def get_current_user_id(
-    x_qmrsmith_user_id: Annotated[
-        str | None, Header(default=None, alias="X-QMRSmith-User-ID")
-    ],
+    x_qmrsmith_user_id: Annotated[str | None, Header(alias="X-QMRSmith-User-ID")] = None,
 ) -> int:
     """Resolve an actor only for non-production development environments.
 
