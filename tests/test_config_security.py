@@ -1,5 +1,5 @@
-import pytest
 from pydantic import SecretStr
+import pytest
 
 from qmrsmithbot.config import Settings
 
