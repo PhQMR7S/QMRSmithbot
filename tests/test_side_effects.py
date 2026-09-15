@@ -1,61 +1,17 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
-from qmrsmithbot.workflows.action_policy import ActionPolicyError
 from qmrsmithbot.workflows.actions import ActionExecutionError, ActionFailureKind
 from qmrsmithbot.workflows.executor import ExecutionContext, ExecutionIdentity
 from qmrsmithbot.workflows.schema import WorkflowNode
 from qmrsmithbot.workflows.side_effects import (
-    DeleteMessageActionHandler,
-    EditMessageActionHandler,
     HttpActionHandler,
     SendMessageActionHandler,
     SideEffectLimits,
 )
-
-
-class FakeTelegramContext:
-    def __init__(self, message_id: int = 77) -> None:
-        self.message_id = message_id
-
-
-class FakeBot:
-    def __init__(self) -> None:
-        self.sent = []
-        self.edited = []
-        self.deleted = []
-
-    async def send_message(self, *, chat_id, text):
-        self.sent.append((chat_id, text))
-        return FakeTelegramContext()
-
-    async def edit_message_text(self, *, chat_id, message_id, text):
-        self.edited.append((chat_id, message_id, text))
-        return FakeTelegramContext(message_id)
-
-    async def delete_message(self, *, chat_id, message_id):
-        self.deleted.append((chat_id, message_id))
-
-
-class FakeFactory:
-    def __init__(self, bot: FakeBot) -> None:
-        self.fake_bot = bot
-
-    def bot(self, project_id):
-        factory = self
-
-        class CM:
-            async def __aenter__(self):
-                return factory.fake_bot
-
-            async def __aexit__(self, *args):
-                return False
-
-        return CM()
 
 
 def context() -> ExecutionContext:
@@ -70,17 +26,6 @@ def context() -> ExecutionContext:
             chat_id=123,
         )
     )
-
-
-def test_message_handler_uses_context_chat_id(monkeypatch):
-    from qmrsmithbot.workflows import side_effects
-
-    bot = FakeBot()
-    monkeypatch.setattr(side_effects, "TelegramBotClientFactory", lambda session: FakeFactory(bot))
-    handler = SendMessageActionHandler(SimpleNamespace())
-    result = pytest.run(asyncio=True) if False else None
-    assert handler.action_type == "action.message"
-    assert result is None
 
 
 def test_message_validation_rejects_empty_text():
