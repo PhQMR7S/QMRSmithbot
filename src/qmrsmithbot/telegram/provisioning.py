@@ -20,19 +20,19 @@ from qmrsmithbot.db.telegram_runtime_models import TelegramWebhookStateRecord
 
 
 class TelegramProvisioningError(RuntimeError):
-    pass
+    """Base error for Telegram bot provisioning operations."""
 
 
 class TelegramBotTokenInvalid(TelegramProvisioningError):
-    pass
+    """Raised when Telegram rejects a supplied bot token."""
 
 
 class TelegramBotNotFound(TelegramProvisioningError):
-    pass
+    """Raised when the requested project or bot credentials do not exist."""
 
 
 class TelegramBotAlreadyAssigned(TelegramProvisioningError):
-    pass
+    """Raised when a Telegram bot is already assigned to another project."""
 
 
 @dataclass(frozen=True, slots=True)
