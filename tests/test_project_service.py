@@ -2,10 +2,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from qmrsmithbot.domain.models import WorkflowVersion
+from qmrsmithbot.domain.models import BotProject as Project, WorkflowVersion
 from qmrsmithbot.projects.service import (
     InvalidWorkflowError,
-    Project,
     ProjectNotFoundError,
     ProjectService,
     VersionNotFoundError,
