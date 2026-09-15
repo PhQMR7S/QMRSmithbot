@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from secrets import token_urlsafe
 
-from fastapi import HTTPException, Request, status
 import redis.asyncio as redis
+from fastapi import HTTPException, Request, status
 from redis.exceptions import RedisError
 
 from qmrsmithbot.config import settings
