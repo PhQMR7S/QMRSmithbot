@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -14,9 +15,14 @@ class SessionAdministrationService:
         self.session = session
 
     async def list_active(self, user_id: int) -> list[SessionInfo]:
+        now = datetime.now(UTC)
         rows = await self.session.execute(
             select(SessionRecord)
-            .where(SessionRecord.user_id == user_id)
+            .where(
+                SessionRecord.user_id == user_id,
+                SessionRecord.revoked_at.is_(None),
+                SessionRecord.expires_at > now,
+            )
             .order_by(SessionRecord.created_at.desc())
         )
         return [
@@ -30,18 +36,17 @@ class SessionAdministrationService:
                 ip_address=record.ip_address,
             )
             for record in rows.scalars()
-            if record.revoked_at is None and record.expires_at > record.last_seen_at
         ]
 
-    async def revoke(self, *, user_id: int, session_id: UUID) -> None:
+    async def revoke(self, *, user_id: int, session_id: UUID) -> bool:
         record = await self.session.scalar(
             select(SessionRecord).where(
                 SessionRecord.id == session_id,
                 SessionRecord.user_id == user_id,
             )
         )
-        if record is not None and record.revoked_at is None:
-            from datetime import UTC, datetime
-
-            record.revoked_at = datetime.now(UTC)
-            await self.session.flush()
+        if record is None or record.revoked_at is not None:
+            return False
+        record.revoked_at = datetime.now(UTC)
+        await self.session.flush()
+        return True
