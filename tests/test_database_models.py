@@ -10,6 +10,7 @@ from qmrsmithbot.db.models import (
     TenantRecord,
     WorkflowVersionRecord,
 )
+from qmrsmithbot.db.telegram_runtime_models import TelegramUpdateInboxRecord, TelegramWebhookStateRecord
 
 
 def test_database_schema_contains_expected_tables() -> None:
@@ -23,6 +24,8 @@ def test_database_schema_contains_expected_tables() -> None:
         "oidc_login_states",
         "bot_credentials",
         "bot_projects",
+        "telegram_webhook_states",
+        "telegram_update_inbox",
         "workflow_versions",
         "audit_events",
     }
@@ -99,3 +102,14 @@ def test_bot_credentials_are_project_scoped_and_versioned() -> None:
         constraint.name == "ck_bot_credentials_token_version_positive"
         for constraint in BotCredentialRecord.__table__.constraints
     )
+
+
+def test_webhook_state_is_project_scoped() -> None:
+    assert TelegramWebhookStateRecord.__table__.c.project_id.primary_key is True
+    assert TelegramWebhookStateRecord.__table__.c.webhook_url.nullable is False
+
+
+def test_update_inbox_is_idempotent_per_project_and_update() -> None:
+    names = {constraint.name for constraint in TelegramUpdateInboxRecord.__table__.constraints}
+    assert "uq_telegram_update_project_update" in names
+    assert TelegramUpdateInboxRecord.__table__.c.payload.nullable is False
