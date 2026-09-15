@@ -37,6 +37,34 @@ def test_unknown_edge_is_rejected() -> None:
         )
 
 
+def test_empty_workflow_is_rejected() -> None:
+    with pytest.raises(ValueError, match="at least 1 item"):
+        WorkflowDefinition.model_validate({"nodes": []})
+
+
+def test_workflow_without_trigger_is_rejected() -> None:
+    with pytest.raises(ValueError, match="trigger node"):
+        WorkflowDefinition.model_validate(
+            {"nodes": [{"id": "reply", "type": "action.message"}]}
+        )
+
+
+def test_duplicate_edges_are_rejected() -> None:
+    with pytest.raises(ValueError, match="edges must be unique"):
+        WorkflowDefinition.model_validate(
+            {
+                "nodes": [
+                    {"id": "start", "type": "trigger.command"},
+                    {"id": "reply", "type": "action.message"},
+                ],
+                "edges": [
+                    {"source": "start", "target": "reply"},
+                    {"source": "start", "target": "reply"},
+                ],
+            }
+        )
+
+
 async def test_workflow_step_limit_stops_cycles() -> None:
     workflow = WorkflowDefinition.model_validate(
         {
@@ -60,6 +88,21 @@ async def test_workflow_step_limit_stops_cycles() -> None:
     assert context.values["runs"] == 1
 
 
+async def test_missing_action_handler_is_rejected() -> None:
+    workflow = WorkflowDefinition.model_validate(
+        {
+            "nodes": [
+                {"id": "start", "type": "trigger.command"},
+                {"id": "reply", "type": "action.message"},
+            ],
+            "edges": [{"source": "start", "target": "reply"}],
+        }
+    )
+
+    with pytest.raises(WorkflowExecutionError, match="no handler registered"):
+        await WorkflowExecutor().run(workflow, ExecutionContext())
+
+
 async def test_execution_limit_is_enforced_for_many_distinct_nodes() -> None:
     nodes = [{"id": "start", "type": "trigger.command"}]
     edges = []
@@ -81,3 +124,8 @@ async def test_execution_limit_is_enforced_for_many_distinct_nodes() -> None:
         await WorkflowExecutor({"action.message": handle}, max_steps=3).run(
             workflow, ExecutionContext()
         )
+
+
+def test_executor_rejects_invalid_step_limit() -> None:
+    with pytest.raises(ValueError, match="max_steps"):
+        WorkflowExecutor(max_steps=0)
