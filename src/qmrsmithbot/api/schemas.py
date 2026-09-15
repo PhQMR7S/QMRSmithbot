@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -37,10 +38,4 @@ class WorkflowVersionResponse(BaseModel):
     project_id: UUID
     version: int
     definition: dict[str, Any]
-    published_at: str | None
-
-
-class ErrorResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    detail: str
+    published_at: datetime | None
