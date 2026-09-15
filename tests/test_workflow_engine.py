@@ -1,6 +1,10 @@
 import pytest
 
-from qmrsmithbot.workflows.executor import ExecutionContext, WorkflowExecutionError, WorkflowExecutor
+from qmrsmithbot.workflows.executor import (
+    ExecutionContext,
+    WorkflowExecutionError,
+    WorkflowExecutor,
+)
 from qmrsmithbot.workflows.schema import WorkflowDefinition, WorkflowNode
 
 
@@ -61,7 +65,12 @@ async def test_execution_limit_is_enforced_for_many_distinct_nodes() -> None:
     edges = []
     for index in range(1, 5):
         nodes.append({"id": f"node-{index}", "type": "action.message"})
-        edges.append({"source": f"node-{index - 1}" if index > 1 else "start", "target": f"node-{index}"})
+        edges.append(
+            {
+                "source": f"node-{index - 1}" if index > 1 else "start",
+                "target": f"node-{index}",
+            }
+        )
 
     workflow = WorkflowDefinition.model_validate({"nodes": nodes, "edges": edges})
 
