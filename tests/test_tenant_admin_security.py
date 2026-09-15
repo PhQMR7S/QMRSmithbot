@@ -1,6 +1,6 @@
 import pytest
 
-from qmrsmithbot.auth.models import ROLE_RANK, ROLE_PERMISSIONS, Permission, TenantRole
+from qmrsmithbot.auth.models import ROLE_PERMISSIONS, ROLE_RANK, Permission, TenantRole
 from qmrsmithbot.auth.service import TenantAdministrationError, TenantService
 
 
