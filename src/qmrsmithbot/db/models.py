@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
@@ -43,6 +44,13 @@ class User(Base):
 
 class BotProjectRecord(Base):
     __tablename__ = "bot_projects"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'running', 'stopped', 'error')",
+            name="ck_bot_projects_status",
+        ),
+        CheckConstraint("active_version IS NULL OR active_version > 0", name="ck_bot_projects_version"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
@@ -61,13 +69,16 @@ class BotProjectRecord(Base):
 
 class WorkflowVersionRecord(Base):
     __tablename__ = "workflow_versions"
-    __table_args__ = (UniqueConstraint("project_id", "version", name="uq_workflow_project_version"),)
+    __table_args__ = (
+        CheckConstraint("version > 0", name="ck_workflow_versions_version_positive"),
+        UniqueConstraint("project_id", "version", name="uq_workflow_project_version"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     project_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("bot_projects.id", ondelete="CASCADE"), index=True
     )
-    version: Mapped[int] = mapped_column(Integer)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
     definition: Mapped[dict] = mapped_column(JSONB, nullable=False)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
