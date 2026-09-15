@@ -10,7 +10,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmrsmithbot.db.models import BotProjectRecord, WorkflowVersionRecord
-from qmrsmithbot.telegram.execution import NonRetryableTelegramUpdateError, TelegramRuntimeContext, TelegramUpdateHandler
+from qmrsmithbot.telegram.execution import (
+    NonRetryableTelegramUpdateError,
+    TelegramRuntimeContext,
+    TelegramUpdateHandler,
+)
 from qmrsmithbot.telegram.queue import ClaimedTelegramUpdate
 from qmrsmithbot.workflows.schema import WorkflowDefinition, WorkflowNode
 
@@ -143,7 +147,11 @@ class TelegramTriggerResolver:
 
     @staticmethod
     def resolve(definition: WorkflowDefinition, event: TelegramEvent) -> tuple[TriggerMatch, ...]:
-        return tuple(TriggerMatch(node.id, node.type) for node in definition.nodes if node.type.startswith("trigger.") and TelegramTriggerResolver._matches(node, event))
+        return tuple(
+            TriggerMatch(node.id, node.type)
+            for node in definition.nodes
+            if node.type.startswith("trigger.") and TelegramTriggerResolver._matches(node, event)
+        )
 
     @staticmethod
     def _matches(node: WorkflowNode, event: TelegramEvent) -> bool:
