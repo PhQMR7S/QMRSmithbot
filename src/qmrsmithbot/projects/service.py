@@ -16,7 +16,7 @@ class VersionNotFoundError(LookupError):
 
 
 class InvalidWorkflowError(ValueError):
-    """Raised when a workflow cannot be published."""
+    """Raised when a workflow cannot be persisted or published."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,24 +38,25 @@ class WorkflowVersion:
 
 
 class ProjectStore:
-    """Persistence contract required by the project lifecycle service."""
+    """Persistence contract for atomic project/version lifecycle operations."""
 
-    async def create_project(self, project: Project) -> Project:  # pragma: no cover - protocol shape
+    async def create_project(self, project: Project) -> Project:
         raise NotImplementedError
 
     async def get_project_for_owner(self, project_id: UUID, owner_id: int) -> Project | None:
         raise NotImplementedError
 
-    async def next_version(self, project_id: UUID) -> int:
-        raise NotImplementedError
-
-    async def create_version(self, version: WorkflowVersion) -> WorkflowVersion:
+    async def create_next_version(
+        self, project_id: UUID, definition: dict, version_id: UUID
+    ) -> WorkflowVersion:
+        """Create the next version atomically with its version allocation."""
         raise NotImplementedError
 
     async def get_version(self, project_id: UUID, version: int) -> WorkflowVersion | None:
         raise NotImplementedError
 
     async def activate_version(self, project_id: UUID, version: int) -> Project:
+        """Atomically switch the project's active version."""
         raise NotImplementedError
 
 
@@ -71,9 +72,9 @@ class ProjectService:
         if len(normalized_name) > 120:
             raise ValueError("project name must not exceed 120 characters")
 
-        project = Project(id=uuid4(), owner_id=owner_id, name=normalized_name)
-        created = await self.store.create_project(project)
-        return created
+        return await self.store.create_project(
+            Project(id=uuid4(), owner_id=owner_id, name=normalized_name)
+        )
 
     async def save_version(
         self,
@@ -83,18 +84,12 @@ class ProjectService:
         definition: dict,
     ) -> WorkflowVersion:
         self._require_owner(await self.store.get_project_for_owner(project_id, owner_id))
-        try:
-            workflow = WorkflowDefinition.model_validate(definition)
-        except ValueError as exc:
-            raise InvalidWorkflowError(str(exc)) from exc
-
-        version = WorkflowVersion(
-            id=uuid4(),
-            project_id=project_id,
-            version=await self.store.next_version(project_id),
-            definition=workflow.model_dump(mode="json"),
+        workflow = self._validate_definition(definition)
+        return await self.store.create_next_version(
+            project_id,
+            workflow.model_dump(mode="json"),
+            uuid4(),
         )
-        return await self.store.create_version(version)
 
     async def publish(
         self,
@@ -107,14 +102,10 @@ class ProjectService:
         stored = await self.store.get_version(project_id, version)
         if stored is None:
             raise VersionNotFoundError(f"workflow version {version} was not found")
-        try:
-            WorkflowDefinition.model_validate(stored.definition)
-        except ValueError as exc:
-            raise InvalidWorkflowError(str(exc)) from exc
+        self._validate_definition(stored.definition)
 
         project = await self.store.activate_version(project_id, version)
-        if self.audit is not None:
-            await self.audit("project.publish", project_id, owner_id)
+        await self._audit("project.publish", project_id, owner_id)
         return project
 
     async def rollback(
@@ -125,14 +116,23 @@ class ProjectService:
         version: int,
     ) -> Project:
         self._require_owner(await self.store.get_project_for_owner(project_id, owner_id))
-        stored = await self.store.get_version(project_id, version)
-        if stored is None:
+        if await self.store.get_version(project_id, version) is None:
             raise VersionNotFoundError(f"workflow version {version} was not found")
 
         project = await self.store.activate_version(project_id, version)
-        if self.audit is not None:
-            await self.audit("project.rollback", project_id, owner_id)
+        await self._audit("project.rollback", project_id, owner_id)
         return project
+
+    async def _audit(self, action: str, project_id: UUID, owner_id: int) -> None:
+        if self.audit is not None:
+            await self.audit(action, project_id, owner_id)
+
+    @staticmethod
+    def _validate_definition(definition: dict) -> WorkflowDefinition:
+        try:
+            return WorkflowDefinition.model_validate(definition)
+        except ValueError as exc:
+            raise InvalidWorkflowError(str(exc)) from exc
 
     @staticmethod
     def _require_owner(project: Project | None) -> Project:
