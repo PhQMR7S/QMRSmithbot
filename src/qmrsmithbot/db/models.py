@@ -137,6 +137,25 @@ class OIDCLoginStateRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class BotCredentialRecord(Base):
+    __tablename__ = "bot_credentials"
+    __table_args__ = (
+        CheckConstraint("token_version > 0", name="ck_bot_credentials_token_version_positive"),
+    )
+
+    project_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("bot_projects.id", ondelete="CASCADE"), primary_key=True
+    )
+    token_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    token_last4: Mapped[str] = mapped_column(String(4), nullable=False)
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    webhook_secret_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class BotProjectRecord(Base):
     __tablename__ = "bot_projects"
     __table_args__ = (

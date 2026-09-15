@@ -1,5 +1,6 @@
 from qmrsmithbot.db.models import (
     AuditEvent,
+    BotCredentialRecord,
     BotProjectRecord,
     IdentityRecord,
     OIDCLoginStateRecord,
@@ -8,6 +9,10 @@ from qmrsmithbot.db.models import (
     TenantMembershipRecord,
     TenantRecord,
     WorkflowVersionRecord,
+)
+from qmrsmithbot.db.telegram_runtime_models import (
+    TelegramUpdateInboxRecord,
+    TelegramWebhookStateRecord,
 )
 
 
@@ -20,7 +25,10 @@ def test_database_schema_contains_expected_tables() -> None:
         "tenant_memberships",
         "tenant_invitations",
         "oidc_login_states",
+        "bot_credentials",
         "bot_projects",
+        "telegram_webhook_states",
+        "telegram_update_inbox",
         "workflow_versions",
         "audit_events",
     }
@@ -87,3 +95,27 @@ def test_invitation_token_hash_is_unique() -> None:
 def test_oidc_state_has_single_use_fields() -> None:
     assert OIDCLoginStateRecord.__table__.c.state_hash.unique is True
     assert OIDCLoginStateRecord.__table__.c.used_at.nullable is True
+
+
+def test_bot_credentials_are_project_scoped_and_versioned() -> None:
+    assert BotCredentialRecord.__table__.c.project_id.primary_key is True
+    assert BotCredentialRecord.__table__.c.token_ciphertext.nullable is False
+    assert BotCredentialRecord.__table__.c.webhook_secret_hash.nullable is False
+    assert any(
+        constraint.name == "ck_bot_credentials_token_version_positive"
+        for constraint in BotCredentialRecord.__table__.constraints
+    )
+
+
+def test_webhook_state_is_project_scoped() -> None:
+    assert TelegramWebhookStateRecord.__table__.c.project_id.primary_key is True
+    assert TelegramWebhookStateRecord.__table__.c.webhook_url.nullable is False
+
+
+def test_update_inbox_has_idempotency_and_lease_invariants() -> None:
+    names = {constraint.name for constraint in TelegramUpdateInboxRecord.__table__.constraints}
+    assert "uq_telegram_update_project_update" in names
+    assert "ck_telegram_update_inbox_attempts_nonnegative" in names
+    assert TelegramUpdateInboxRecord.__table__.c.payload.nullable is False
+    assert TelegramUpdateInboxRecord.__table__.c.claimed_by.nullable is True
+    assert TelegramUpdateInboxRecord.__table__.c.lease_until.nullable is True

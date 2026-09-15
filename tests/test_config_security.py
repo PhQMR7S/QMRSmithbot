@@ -13,6 +13,12 @@ OIDC_TEST_VALUES = {
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
     ),
 }
+TELEGRAM_TEST_VALUES = {
+    "telegram_credential_encryption_key": SecretStr(
+        "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+    ),
+    "telegram_webhook_base_url": "https://app.example.com",
+}
 
 
 def test_production_requires_rate_limiting() -> None:
@@ -23,6 +29,7 @@ def test_production_requires_rate_limiting() -> None:
             database_url="postgresql+asyncpg://app:secret@db/qmrsmith",
             auth_dev_bootstrap_enabled=False,
             rate_limit_enabled=False,
+            **TELEGRAM_TEST_VALUES,
         )
 
 
@@ -34,6 +41,8 @@ def test_production_accepts_explicit_security_controls() -> None:
         auth_dev_bootstrap_enabled=False,
         rate_limit_enabled=True,
         **OIDC_TEST_VALUES,
+        **TELEGRAM_TEST_VALUES,
     )
     assert settings.rate_limit_requests == 10
     assert settings.rate_limit_window_seconds == 60
+    assert settings.telegram_webhook_base_url == "https://app.example.com"
