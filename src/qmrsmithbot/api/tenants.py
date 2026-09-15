@@ -4,7 +4,6 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmrsmithbot.api.dependencies import (
@@ -14,7 +13,6 @@ from qmrsmithbot.api.dependencies import (
 )
 from qmrsmithbot.api.schemas import (
     MemberRoleRequest,
-    OIDCStartResponse,
     OwnershipTransferRequest,
     TenantCreateRequest,
     TenantInvitationAcceptRequest,
@@ -25,8 +23,8 @@ from qmrsmithbot.api.schemas import (
 )
 from qmrsmithbot.auth.authorization import AuthorizationService
 from qmrsmithbot.auth.models import ROLE_RANK, Permission, Principal, TenantRole
-from qmrsmithbot.auth.service import TenantAdministrationError, TenantService
-from qmrsmithbot.db.models import AuditEvent
+from qmrsmithbot.auth.service import SessionService, TenantAdministrationError, TenantService
+from qmrsmithbot.db.models import AuditEvent, TenantRecord
 from qmrsmithbot.db.session import get_session
 from qmrsmithbot.request_context import get_request_id
 
@@ -35,6 +33,16 @@ router = APIRouter(prefix="/api/v1/tenants", tags=["tenants"])
 
 def _tenant_response(tenant) -> TenantResponse:
     return TenantResponse(id=tenant.id, name=tenant.name, slug=tenant.slug)
+
+
+def _member_response(member) -> TenantMemberResponse:
+    return TenantMemberResponse(
+        tenant_id=member.tenant_id,
+        user_id=member.user_id,
+        role=member.role,
+        username=member.username,
+        email=member.email,
+    )
 
 
 async def _audit(
@@ -99,7 +107,7 @@ async def list_members(
         user_id=principal.user_id, tenant_id=tenant_id, permission=Permission.MEMBERS_READ
     )
     members = await TenantService(session).list_members(tenant_id)
-    return [TenantMemberResponse(**member.__dict__) for member in members]
+    return [_member_response(member) for member in members]
 
 
 @router.post("/invitations", response_model=TenantInvitationResponse, status_code=status.HTTP_201_CREATED)
@@ -148,7 +156,7 @@ async def accept_invitation(
         )
     except TenantAdministrationError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
-    tenant = await session.get(__import__("qmrsmithbot.db.models", fromlist=["TenantRecord"]).TenantRecord, tenant_id)
+    tenant = await session.get(TenantRecord, tenant_id)
     if tenant is None:
         raise HTTPException(status_code=404, detail="tenant was not found")
     await _audit(
@@ -203,6 +211,7 @@ async def change_member_role(
             new_role=payload.role,
             actor_role=membership.role,
         )
+        await SessionService(session).revoke_all(user_id=target_user_id)
     except TenantAdministrationError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     await _audit(
@@ -218,13 +227,7 @@ async def change_member_role(
     )
     if member is None:
         raise HTTPException(status_code=404, detail="member was not found")
-    return TenantMemberResponse(
-        tenant_id=member.tenant_id,
-        user_id=member.user_id,
-        role=member.role,
-        username=member.username,
-        email=member.email,
-    )
+    return _member_response(member)
 
 
 @router.post("/ownership/transfer", response_model=TenantMemberResponse)
@@ -244,6 +247,8 @@ async def transfer_ownership(
             current_owner_id=principal.user_id,
             new_owner_id=payload.new_owner_user_id,
         )
+        await SessionService(session).revoke_all(user_id=payload.new_owner_user_id)
+        await SessionService(session).revoke_all(user_id=principal.user_id)
     except TenantAdministrationError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     await _audit(
@@ -259,13 +264,7 @@ async def transfer_ownership(
     )
     if member is None:
         raise HTTPException(status_code=404, detail="new owner was not found")
-    return TenantMemberResponse(
-        tenant_id=member.tenant_id,
-        user_id=member.user_id,
-        role=member.role,
-        username=member.username,
-        email=member.email,
-    )
+    return _member_response(member)
 
 
 @router.delete("/members/{target_user_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -285,6 +284,7 @@ async def remove_member(
         await TenantService(session).remove_member(
             tenant_id=tenant_id, target_user_id=target_user_id, actor_role=membership.role
         )
+        await SessionService(session).revoke_all(user_id=target_user_id)
     except TenantAdministrationError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     await _audit(
