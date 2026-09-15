@@ -4,6 +4,9 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
+from qmrsmithbot.domain.models import BotProject as Project
+from qmrsmithbot.domain.models import BotStatus
+from qmrsmithbot.domain.models import WorkflowVersion
 from qmrsmithbot.workflows.schema import WorkflowDefinition
 
 
@@ -19,26 +22,8 @@ class InvalidWorkflowError(ValueError):
     """Raised when a workflow cannot be persisted or published."""
 
 
-@dataclass(frozen=True, slots=True)
-class Project:
-    id: UUID
-    owner_id: int
-    name: str
-    active_version: int | None = None
-    status: str = "draft"
-
-
-@dataclass(frozen=True, slots=True)
-class WorkflowVersion:
-    id: UUID
-    project_id: UUID
-    version: int
-    definition: dict
-    published: bool = False
-
-
 class ProjectStore:
-    """Persistence contract for atomic project/version lifecycle operations."""
+    """Persistence contract for project/version lifecycle operations."""
 
     async def create_project(self, project: Project) -> Project:
         raise NotImplementedError
@@ -66,6 +51,9 @@ class ProjectService:
     audit: Callable[[str, UUID, int], Awaitable[None]] | None = None
 
     async def create_project(self, *, owner_id: int, name: str) -> Project:
+        if owner_id <= 0:
+            raise ValueError("owner id must be positive")
+
         normalized_name = name.strip()
         if not normalized_name:
             raise ValueError("project name must not be empty")
@@ -116,8 +104,10 @@ class ProjectService:
         version: int,
     ) -> Project:
         self._require_owner(await self.store.get_project_for_owner(project_id, owner_id))
-        if await self.store.get_version(project_id, version) is None:
+        stored = await self.store.get_version(project_id, version)
+        if stored is None:
             raise VersionNotFoundError(f"workflow version {version} was not found")
+        self._validate_definition(stored.definition)
 
         project = await self.store.activate_version(project_id, version)
         await self._audit("project.rollback", project_id, owner_id)
