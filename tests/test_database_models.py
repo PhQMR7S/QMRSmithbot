@@ -39,7 +39,9 @@ def test_tenant_membership_has_role_invariant() -> None:
 
 def test_project_is_tenant_scoped() -> None:
     assert BotProjectRecord.__table__.c.tenant_id.nullable is False
-    foreign_keys = {fk.target_fullname for fk in BotProjectRecord.__table__.c.tenant_id.foreign_keys}
+    foreign_keys = {
+        fk.target_fullname for fk in BotProjectRecord.__table__.c.tenant_id.foreign_keys
+    }
     assert "tenants.id" in foreign_keys
 
 

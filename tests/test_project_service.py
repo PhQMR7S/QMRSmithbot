@@ -121,7 +121,9 @@ async def test_save_version_is_tenant_scoped_and_validated() -> None:
     assert version.version == 1
     assert version.definition["schema_version"] == 1
     with pytest.raises(ProjectNotFoundError):
-        await service.save_version(project_id=project.id, tenant_id=TENANT_B, definition=VALID_WORKFLOW)
+        await service.save_version(
+            project_id=project.id, tenant_id=TENANT_B, definition=VALID_WORKFLOW
+        )
     with pytest.raises(InvalidWorkflowError, match="trigger"):
         await service.save_version(
             project_id=project.id,
@@ -140,8 +142,12 @@ async def test_publish_and_rollback_are_audited() -> None:
         events.append(f"{action}:{project_id}:{owner_id}")
 
     service = ProjectService(store, audit=audit)
-    first = await service.save_version(project_id=project.id, tenant_id=TENANT_A, definition=VALID_WORKFLOW)
-    second = await service.save_version(project_id=project.id, tenant_id=TENANT_A, definition=VALID_WORKFLOW)
+    first = await service.save_version(
+        project_id=project.id, tenant_id=TENANT_A, definition=VALID_WORKFLOW
+    )
+    second = await service.save_version(
+        project_id=project.id, tenant_id=TENANT_A, definition=VALID_WORKFLOW
+    )
     published = await service.publish(
         project_id=project.id, tenant_id=TENANT_A, actor_user_id=42, version=second.version
     )
@@ -162,4 +168,6 @@ async def test_publish_rejects_missing_version() -> None:
     await store.create_project(project)
     service = ProjectService(store)
     with pytest.raises(VersionNotFoundError):
-        await service.publish(project_id=project.id, tenant_id=TENANT_A, actor_user_id=42, version=99)
+        await service.publish(
+            project_id=project.id, tenant_id=TENANT_A, actor_user_id=42, version=99
+        )

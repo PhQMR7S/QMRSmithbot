@@ -9,7 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from qmrsmithbot.db.models import BotProjectRecord, WorkflowVersionRecord
 from qmrsmithbot.domain.models import BotProject as Project
 from qmrsmithbot.domain.models import BotStatus, WorkflowVersion
-from qmrsmithbot.projects.service import ProjectStore
+from qmrsmithbot.projects.service import (
+    ProjectNotFoundError,
+    ProjectStore,
+    VersionNotFoundError,
+)
 
 
 class SQLAlchemyProjectStore(ProjectStore):
@@ -50,7 +54,7 @@ class SQLAlchemyProjectStore(ProjectStore):
             .with_for_update()
         )
         if project is None:
-            raise LookupError("project was not found")
+            raise ProjectNotFoundError("project was not found")
         latest = await self.session.scalar(
             select(func.max(WorkflowVersionRecord.version)).where(
                 WorkflowVersionRecord.project_id == project_id
@@ -90,7 +94,7 @@ class SQLAlchemyProjectStore(ProjectStore):
             .with_for_update()
         )
         if project is None:
-            raise LookupError("project was not found")
+            raise ProjectNotFoundError("project was not found")
         version_record = await self.session.scalar(
             select(WorkflowVersionRecord).where(
                 WorkflowVersionRecord.project_id == project_id,
@@ -98,7 +102,7 @@ class SQLAlchemyProjectStore(ProjectStore):
             )
         )
         if version_record is None:
-            raise LookupError(f"workflow version {version} was not found")
+            raise VersionNotFoundError(f"workflow version {version} was not found")
         project.active_version = version
         project.status = BotStatus.RUNNING
         if version_record.published_at is None:

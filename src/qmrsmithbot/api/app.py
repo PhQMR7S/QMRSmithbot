@@ -4,8 +4,16 @@ from fastapi.responses import JSONResponse
 from qmrsmithbot.api.auth import router as auth_router
 from qmrsmithbot.api.projects import router as projects_router
 from qmrsmithbot.auth.authorization import AuthorizationDenied
-from qmrsmithbot.auth.service import AuthenticationError, TenantAccessError, TenantSelectionRequired
-from qmrsmithbot.projects.service import InvalidWorkflowError, ProjectNotFoundError, VersionNotFoundError
+from qmrsmithbot.auth.service import (
+    AuthenticationError,
+    TenantAccessError,
+    TenantSelectionRequired,
+)
+from qmrsmithbot.projects.service import (
+    InvalidWorkflowError,
+    ProjectNotFoundError,
+    VersionNotFoundError,
+)
 
 app = FastAPI(title="QMRSmithbot", version="0.1.0")
 app.include_router(auth_router)
