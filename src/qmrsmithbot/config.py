@@ -37,6 +37,19 @@ class Settings(BaseSettings):
             raise ValueError("app_env must be development, test, staging, or production")
         if self.session_idle_ttl_minutes >= self.session_absolute_ttl_minutes:
             raise ValueError("session idle TTL must be shorter than absolute TTL")
+        if environment == "production":
+            if not self.telegram_factory_bot_token.get_secret_value():
+                raise ValueError("TELEGRAM_FACTORY_BOT_TOKEN is required in production")
+            if self.database_url == (
+                "postgresql+asyncpg://qmrsmith:qmrsmith@localhost:5432/qmrsmith"
+            ):
+                raise ValueError("DATABASE_URL must be explicitly configured in production")
+            if self.auth_dev_bootstrap_enabled:
+                raise ValueError("AUTH_DEV_BOOTSTRAP_ENABLED must be false in production")
+            if not self.rate_limit_enabled:
+                raise ValueError("RATE_LIMIT_ENABLED must be true in production")
+            if not self.auth_oidc_enabled:
+                raise ValueError("AUTH_OIDC_ENABLED must be true in production")
         if self.auth_oidc_enabled:
             required = {
                 "AUTH_OIDC_ISSUER": self.auth_oidc_issuer,
@@ -58,19 +71,6 @@ class Settings(BaseSettings):
                 Fernet(self.auth_state_encryption_key.get_secret_value().encode("ascii"))
             except (ValueError, TypeError) as exc:
                 raise ValueError("AUTH_STATE_ENCRYPTION_KEY must be a valid Fernet key") from exc
-        if environment == "production":
-            if not self.telegram_factory_bot_token.get_secret_value():
-                raise ValueError("TELEGRAM_FACTORY_BOT_TOKEN is required in production")
-            if self.database_url == (
-                "postgresql+asyncpg://qmrsmith:qmrsmith@localhost:5432/qmrsmith"
-            ):
-                raise ValueError("DATABASE_URL must be explicitly configured in production")
-            if self.auth_dev_bootstrap_enabled:
-                raise ValueError("AUTH_DEV_BOOTSTRAP_ENABLED must be false in production")
-            if not self.auth_oidc_enabled:
-                raise ValueError("AUTH_OIDC_ENABLED must be true in production")
-            if not self.rate_limit_enabled:
-                raise ValueError("RATE_LIMIT_ENABLED must be true in production")
         if self.platform_required_channel_enabled and not self.platform_required_channel.strip():
             raise ValueError(
                 "PLATFORM_REQUIRED_CHANNEL is required when platform access protection is enabled"
