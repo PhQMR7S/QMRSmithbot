@@ -3,7 +3,7 @@ from uuid import uuid4
 import pytest
 
 from qmrsmithbot.auth.authorization import AuthorizationService
-from qmrsmithbot.auth.models import Permission, ROLE_PERMISSIONS, TenantRole
+from qmrsmithbot.auth.models import ROLE_PERMISSIONS, Permission, TenantRole
 from qmrsmithbot.auth.service import SessionService
 
 
