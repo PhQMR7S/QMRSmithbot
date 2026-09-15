@@ -63,19 +63,21 @@ async def create_development_session(
 
 @router.get("/oidc/start", response_model=OIDCStartResponse)
 async def start_oidc_login(
+    _: RateLimitDependency,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OIDCStartResponse:
     service = OIDCService(session)
     try:
         return OIDCStartResponse(authorization_url=await service.begin())
     except OIDCError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="OIDC provider is unavailable") from exc
     finally:
         await service.close()
 
 
 @router.get("/oidc/link/start", response_model=OIDCStartResponse)
 async def start_oidc_link(
+    _: RateLimitDependency,
     principal: Annotated[Principal, Depends(get_current_principal)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OIDCStartResponse:
@@ -83,25 +85,37 @@ async def start_oidc_link(
     try:
         return OIDCStartResponse(authorization_url=await service.begin(user_id=principal.user_id))
     except OIDCError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="OIDC provider is unavailable") from exc
     finally:
         await service.close()
 
 
-@router.get("/oidc/callback", response_model=SessionResponse)
-async def oidc_callback(
-    code: str,
-    state: str,
-    request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+async def _finish_oidc_callback(
+    *, code: str, state: str, session: AsyncSession
 ) -> SessionResponse:
     service = OIDCService(session)
     try:
         principal, token, expires_at = await service.callback(code=code, state=state)
     except IdentityAlreadyLinked as exc:
+        session.add(
+            AuditEvent(
+                action="auth.oidc.identity_link_denied",
+                request_id=get_request_id(),
+                detail="external identity is already linked",
+            )
+        )
+        await session.flush()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except OIDCError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        session.add(
+            AuditEvent(
+                action="auth.oidc.login_failed",
+                request_id=get_request_id(),
+                detail="OIDC authentication transaction failed",
+            )
+        )
+        await session.flush()
+        raise HTTPException(status_code=401, detail="OIDC authentication failed") from exc
     finally:
         await service.close()
     session.add(
@@ -121,13 +135,23 @@ async def oidc_callback(
     )
 
 
+@router.get("/oidc/callback", response_model=SessionResponse)
+async def oidc_callback(
+    code: str,
+    state: str,
+    _: RateLimitDependency,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SessionResponse:
+    return await _finish_oidc_callback(code=code, state=state, session=session)
+
+
 @router.post("/oidc/callback", response_model=SessionResponse)
 async def oidc_callback_post(
     payload: OIDCCallbackRequest,
-    request: Request,
+    _: RateLimitDependency,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SessionResponse:
-    return await oidc_callback(payload.code, payload.state, request, session)
+    return await _finish_oidc_callback(code=payload.code, state=payload.state, session=session)
 
 
 @router.get("/me", response_model=SessionUserResponse)
