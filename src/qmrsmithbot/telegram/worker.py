@@ -10,6 +10,7 @@ from qmrsmithbot.config import settings
 from qmrsmithbot.db.session import SessionFactory
 from qmrsmithbot.telegram.execution import (
     NonRetryableTelegramUpdateError,
+    RetryableTelegramUpdateError,
     TelegramRuntimeExecutionBoundary,
     TelegramUpdateHandler,
 )
@@ -31,9 +32,8 @@ class TelegramRuntimeWorker:
         self._stop.set()
 
     async def run_once(self) -> bool:
-        async with SessionFactory() as session:
-            async with session.begin():
-                item = await TelegramUpdateQueue(session).claim_one(worker_id=self.worker_id)
+        async with SessionFactory() as session, session.begin():
+            item = await TelegramUpdateQueue(session).claim_one(worker_id=self.worker_id)
         if item is None:
             return False
 
@@ -43,38 +43,35 @@ class TelegramRuntimeWorker:
                 timeout=settings.telegram_worker_handler_timeout_seconds,
             )
         except NonRetryableTelegramUpdateError as exc:
-            async with SessionFactory() as session:
-                async with session.begin():
-                    await TelegramUpdateQueue(session).fail(
-                        update_id=item.id,
-                        claim_token=item.claim_token,
-                        error=str(exc),
-                        retry_delay_seconds=0,
-                        terminal=True,
-                    )
-        except Exception as exc:
+            async with SessionFactory() as session, session.begin():
+                await TelegramUpdateQueue(session).fail(
+                    update_id=item.id,
+                    claim_token=item.claim_token,
+                    error=str(exc),
+                    retry_delay_seconds=0,
+                    terminal=True,
+                )
+        except (RetryableTelegramUpdateError, TimeoutError) as exc:
             delay = min(
                 MAX_RETRY_DELAY_SECONDS,
                 max(1, 2 ** min(item.attempts - 1, 8)) + random.randint(0, 3),
             )
-            async with SessionFactory() as session:
-                async with session.begin():
-                    await TelegramUpdateQueue(session).fail(
-                        update_id=item.id,
-                        claim_token=item.claim_token,
-                        error=str(exc) or exc.__class__.__name__,
-                        retry_delay_seconds=delay,
-                    )
+            async with SessionFactory() as session, session.begin():
+                await TelegramUpdateQueue(session).fail(
+                    update_id=item.id,
+                    claim_token=item.claim_token,
+                    error=str(exc) or exc.__class__.__name__,
+                    retry_delay_seconds=delay,
+                )
         else:
-            async with SessionFactory() as session:
-                async with session.begin():
-                    # A lease may legitimately expire while a slow handler is finishing.
-                    # Losing the lease is not a worker-fatal condition: another consumer
-                    # owns the row now, and its completion/failure must remain authoritative.
-                    await TelegramUpdateQueue(session).complete(
-                        update_id=item.id,
-                        claim_token=item.claim_token,
-                    )
+            async with SessionFactory() as session, session.begin():
+                # A lease may legitimately expire while a slow handler is finishing.
+                # Losing the lease is not a worker-fatal condition: another consumer
+                # owns the row now, and its completion/failure remains authoritative.
+                await TelegramUpdateQueue(session).complete(
+                    update_id=item.id,
+                    claim_token=item.claim_token,
+                )
         return True
 
     async def run_forever(self) -> None:
