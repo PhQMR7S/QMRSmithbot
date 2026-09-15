@@ -73,6 +73,15 @@ class SQLAlchemyProjectStore(ProjectStore):
         record = await self.session.scalar(statement)
         return None if record is None else self._version(record)
 
+    async def list_versions(self, project_id: UUID) -> list[WorkflowVersion]:
+        statement = (
+            select(WorkflowVersionRecord)
+            .where(WorkflowVersionRecord.project_id == project_id)
+            .order_by(WorkflowVersionRecord.version.desc())
+        )
+        records = await self.session.scalars(statement)
+        return [self._version(record) for record in records]
+
     async def activate_version(self, project_id: UUID, version: int) -> Project:
         project = await self.session.scalar(
             select(BotProjectRecord)
