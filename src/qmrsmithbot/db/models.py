@@ -52,7 +52,9 @@ class SessionRecord(Base):
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    token_hash: Mapped[str] = mapped_column(
+        String(64), unique=True, nullable=False
+    )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -105,7 +107,9 @@ class BotProjectRecord(Base):
             "status IN ('draft', 'running', 'stopped', 'error')",
             name="ck_bot_projects_status",
         ),
-        CheckConstraint("active_version IS NULL OR active_version > 0", name="ck_bot_projects_version"),
+        CheckConstraint(
+            "active_version IS NULL OR active_version > 0", name="ck_bot_projects_version"
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
