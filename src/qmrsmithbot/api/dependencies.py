@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, status
@@ -14,7 +15,9 @@ from qmrsmithbot.projects.sqlalchemy_store import SQLAlchemyProjectStore
 
 
 async def get_current_user_id(
-    x_qmrsmith_user_id: str | None = Header(default=None, alias="X-QMRSmith-User-ID"),
+    x_qmrsmith_user_id: Annotated[
+        str | None, Header(default=None, alias="X-QMRSmith-User-ID")
+    ],
 ) -> int:
     """Resolve an actor only for non-production development environments.
 
@@ -46,7 +49,7 @@ async def get_current_user_id(
 
 
 async def get_project_service(
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AsyncIterator[ProjectService]:
     async def audit(action: str, project_id: UUID, owner_id: int) -> None:
         session.add(
