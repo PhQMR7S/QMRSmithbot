@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy.dialects.postgresql import insert
@@ -21,6 +21,7 @@ class TelegramUpdateQueue:
         update_id: int,
         payload: dict,
     ) -> bool:
+        now = datetime.now(UTC)
         statement = (
             insert(TelegramUpdateInboxRecord)
             .values(
@@ -30,12 +31,10 @@ class TelegramUpdateQueue:
                 payload=payload,
                 status="queued",
                 attempts=0,
-                received_at=datetime.now(timezone.utc),
-                available_at=datetime.now(timezone.utc),
+                received_at=now,
+                available_at=now,
             )
-            .on_conflict_do_nothing(
-                constraint="uq_telegram_update_project_update"
-            )
+            .on_conflict_do_nothing(constraint="uq_telegram_update_project_update")
         )
         result = await self.session.execute(statement)
         return result.rowcount == 1
