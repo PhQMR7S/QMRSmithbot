@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -105,7 +105,7 @@ class TelegramWebhookService:
             raise TelegramWebhookError("Telegram webhook registration failed") from exc
 
         state.status = "active"
-        state.last_verified_at = datetime.now(timezone.utc)
+        state.last_verified_at = datetime.now(UTC)
         state.last_error = None
         await self.session.flush()
         return WebhookActivationResult(project_id, webhook_url, webhook_secret)
@@ -150,5 +150,5 @@ class TelegramWebhookService:
 
         state.status = "inactive"
         state.last_error = None
-        state.last_verified_at = datetime.now(timezone.utc)
+        state.last_verified_at = datetime.now(UTC)
         await self.session.flush()
