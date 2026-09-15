@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import UUID
@@ -23,18 +24,16 @@ from qmrsmithbot.projects.service import ProjectService
 from qmrsmithbot.projects.sqlalchemy_store import SQLAlchemyProjectStore
 from qmrsmithbot.request_context import get_request_id
 
+logger = logging.getLogger(__name__)
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
-async def _audit_auth_failure(session: AsyncSession, detail: str) -> None:
-    session.add(
-        AuditEvent(
-            action="auth.authentication_failed",
-            detail=detail,
-            request_id=get_request_id(),
-        )
+def _log_auth_failure(detail: str) -> None:
+    logger.warning(
+        "authentication_failed request_id=%s reason=%s",
+        get_request_id(),
+        detail,
     )
-    await session.flush()
 
 
 async def get_current_principal(
@@ -42,7 +41,7 @@ async def get_current_principal(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> Principal:
     if credentials is None or credentials.scheme.lower() != "bearer":
-        await _audit_auth_failure(session, "bearer authentication credentials were missing or invalid")
+        _log_auth_failure("bearer credentials were missing or invalid")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Bearer session token is required",
@@ -51,7 +50,7 @@ async def get_current_principal(
     try:
         principal = await SessionService(session).authenticate(credentials.credentials)
     except AuthenticationError as exc:
-        await _audit_auth_failure(session, "session authentication failed")
+        _log_auth_failure("session authentication failed")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid or expired session",
