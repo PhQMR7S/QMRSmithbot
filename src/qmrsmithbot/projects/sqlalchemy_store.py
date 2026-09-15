@@ -13,15 +13,18 @@ from qmrsmithbot.projects.service import ProjectStore
 
 
 class SQLAlchemyProjectStore(ProjectStore):
-    """PostgreSQL-backed project store with row-locked version allocation."""
+    """PostgreSQL-backed project store with tenant-scoped queries and row locking."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
     async def create_project(self, project: Project) -> Project:
+        if project.tenant_id is None:
+            raise ValueError("tenant id is required")
         record = BotProjectRecord(
             id=project.id,
             owner_id=project.owner_id,
+            tenant_id=project.tenant_id,
             name=project.name,
             active_version=project.active_version,
             status=project.status,
@@ -30,10 +33,10 @@ class SQLAlchemyProjectStore(ProjectStore):
         await self.session.flush()
         return self._project(record)
 
-    async def get_project_for_owner(self, project_id: UUID, owner_id: int) -> Project | None:
+    async def get_project_for_tenant(self, project_id: UUID, tenant_id: UUID) -> Project | None:
         statement = select(BotProjectRecord).where(
             BotProjectRecord.id == project_id,
-            BotProjectRecord.owner_id == owner_id,
+            BotProjectRecord.tenant_id == tenant_id,
         )
         record = await self.session.scalar(statement)
         return None if record is None else self._project(record)
@@ -48,17 +51,15 @@ class SQLAlchemyProjectStore(ProjectStore):
         )
         if project is None:
             raise LookupError("project was not found")
-
         latest = await self.session.scalar(
             select(func.max(WorkflowVersionRecord.version)).where(
                 WorkflowVersionRecord.project_id == project_id
             )
         )
-        next_version = (latest or 0) + 1
         record = WorkflowVersionRecord(
             id=version_id,
             project_id=project_id,
-            version=next_version,
+            version=(latest or 0) + 1,
             definition=definition,
         )
         self.session.add(record)
@@ -66,20 +67,20 @@ class SQLAlchemyProjectStore(ProjectStore):
         return self._version(record)
 
     async def get_version(self, project_id: UUID, version: int) -> WorkflowVersion | None:
-        statement = select(WorkflowVersionRecord).where(
-            WorkflowVersionRecord.project_id == project_id,
-            WorkflowVersionRecord.version == version,
+        record = await self.session.scalar(
+            select(WorkflowVersionRecord).where(
+                WorkflowVersionRecord.project_id == project_id,
+                WorkflowVersionRecord.version == version,
+            )
         )
-        record = await self.session.scalar(statement)
         return None if record is None else self._version(record)
 
     async def list_versions(self, project_id: UUID) -> list[WorkflowVersion]:
-        statement = (
+        records = await self.session.scalars(
             select(WorkflowVersionRecord)
             .where(WorkflowVersionRecord.project_id == project_id)
             .order_by(WorkflowVersionRecord.version.desc())
         )
-        records = await self.session.scalars(statement)
         return [self._version(record) for record in records]
 
     async def activate_version(self, project_id: UUID, version: int) -> Project:
@@ -90,7 +91,6 @@ class SQLAlchemyProjectStore(ProjectStore):
         )
         if project is None:
             raise LookupError("project was not found")
-
         version_record = await self.session.scalar(
             select(WorkflowVersionRecord).where(
                 WorkflowVersionRecord.project_id == project_id,
@@ -99,7 +99,6 @@ class SQLAlchemyProjectStore(ProjectStore):
         )
         if version_record is None:
             raise LookupError(f"workflow version {version} was not found")
-
         project.active_version = version
         project.status = BotStatus.RUNNING
         if version_record.published_at is None:
@@ -112,6 +111,7 @@ class SQLAlchemyProjectStore(ProjectStore):
         return Project(
             id=record.id,
             owner_id=record.owner_id,
+            tenant_id=record.tenant_id,
             name=record.name,
             active_version=record.active_version,
             status=BotStatus(record.status),

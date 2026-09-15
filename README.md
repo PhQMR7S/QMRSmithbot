@@ -36,6 +36,16 @@ QMRSmithbot is being built as a production-grade platform for creating, deployin
 - Mandatory platform-channel subscription gate for hosted bots
 - CI/CD, automated testing, monitoring, and release management
 
+## Current security foundation
+
+The control plane now follows the explicit security chain:
+
+`User → Identity → Session/Token → Principal → Tenant → Membership/Role → Permission → Project`
+
+Implemented foundations include server-side opaque sessions with hashed tokens, absolute and idle session expiry, server-side revocation, tenant-scoped project persistence, deny-by-default role permissions, and development-only authentication bootstrap. Production authentication remains fail-closed until a real identity-provider adapter is wired.
+
+See `docs/AUTHENTICATION.md` for the security model and migration details.
+
 ## Status
 
-Foundation phase. Architecture and implementation are being built incrementally with production readiness as the target.
+Foundation phase is active. Control Plane + Project Lifecycle and the Authentication + Identity + Tenant Security foundation are implemented. Telegram Runtime is intentionally not started until the security boundary is stable and green in CI.

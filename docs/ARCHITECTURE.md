@@ -6,12 +6,29 @@ QMRSmithbot is a multi-tenant Telegram bot creation and runtime platform. A user
 
 ## Layers
 
-1. **Control plane** — users, projects, plans, billing, templates, settings, publishing, audit logs.
+1. **Control plane** — users, identities, sessions, tenants, memberships, projects, plans, billing, templates, settings, publishing, audit logs.
 2. **Builder** — visual workflow representation and validation.
 3. **Runtime** — event ingestion, platform policy middleware, workflow execution, Telegram delivery.
 4. **Async plane** — queues and workers for broadcasts, scheduled work, imports, and long-running tasks.
 5. **Data plane** — PostgreSQL for durable state, Redis for ephemeral state/queues, object storage for assets.
 6. **Observability** — structured logs, metrics, traces, health checks, and audit events.
+
+## Authentication and tenant security
+
+The control plane uses an explicit trust chain:
+
+`User → Identity → Session/Token → Principal → Tenant → Membership/Role → Permission → Project`
+
+- `users` is the internal account record.
+- `identities` binds an authentication provider + immutable subject to a user.
+- `sessions` stores only a SHA-256 hash of an opaque bearer token, with absolute expiry, idle expiry, and revocation.
+- A request resolves to a `Principal(user_id, session_id)` before protected resources are reached.
+- Tenant context is resolved from membership and, when necessary, `X-QMRSmith-Tenant-ID`.
+- `AuthorizationService` applies deny-by-default role permissions.
+- Project persistence filters by `tenant_id`, providing defense in depth against cross-tenant IDOR.
+- Production authentication fails closed until a real identity-provider adapter is configured.
+
+This layer is deliberately independent of Telegram Runtime. Telegram identity/provisioning can later become one authentication integration without becoming a shortcut around tenant authorization.
 
 ## Mandatory platform subscription gate
 

@@ -5,45 +5,83 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from qmrsmithbot.config import settings
+from qmrsmithbot.auth.authorization import AuthorizationService
+from qmrsmithbot.auth.models import Principal
+from qmrsmithbot.auth.service import (
+    AuthenticationError,
+    TenantAccessError,
+    TenantSelectionRequired,
+    SessionService,
+    TenantService,
+)
 from qmrsmithbot.db.models import AuditEvent
 from qmrsmithbot.db.session import get_session
 from qmrsmithbot.projects.service import ProjectService
 from qmrsmithbot.projects.sqlalchemy_store import SQLAlchemyProjectStore
 
+bearer_scheme = HTTPBearer(auto_error=False)
 
-async def get_current_user_id(
-    x_qmrsmith_user_id: Annotated[str | None, Header(alias="X-QMRSmith-User-ID")] = None,
-) -> int:
-    """Resolve an actor only for non-production development environments.
 
-    Production deliberately fails closed until a real authenticated identity provider is wired.
-    """
-    if settings.app_env == "production":
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="authenticated identity provider is not configured",
-        )
-    if x_qmrsmith_user_id is None:
+async def get_current_principal(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Principal:
+    if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="X-QMRSmith-User-ID header is required in development",
+            detail="Bearer session token is required",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     try:
-        user_id = int(x_qmrsmith_user_id)
-    except ValueError as exc:
+        return await SessionService(session).authenticate(credentials.credentials)
+    except AuthenticationError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="X-QMRSmith-User-ID must be a positive integer",
+            detail=str(exc),
+            headers={"WWW-Authenticate": "Bearer"},
         ) from exc
-    if user_id <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="X-QMRSmith-User-ID must be a positive integer",
+
+
+async def get_current_user_id(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+) -> int:
+    """Compatibility dependency exposing the authenticated principal's user ID."""
+    return principal.user_id
+
+
+async def get_current_tenant_id(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    requested_tenant: Annotated[str | None, Header(alias="X-QMRSmith-Tenant-ID")] = None,
+) -> UUID:
+    tenant_id: UUID | None = None
+    if requested_tenant is not None:
+        try:
+            tenant_id = UUID(requested_tenant)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="X-QMRSmith-Tenant-ID must be a valid UUID",
+            ) from exc
+    try:
+        tenant = await TenantService(session).resolve_for_user(
+            user_id=principal.user_id,
+            requested_tenant_id=tenant_id,
         )
-    return user_id
+    except TenantSelectionRequired as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except TenantAccessError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return tenant.id
+
+
+async def get_authorization_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AuthorizationService:
+    return AuthorizationService(session)
 
 
 async def get_project_service(
@@ -59,11 +97,4 @@ async def get_project_service(
         )
         await session.flush()
 
-    service = ProjectService(SQLAlchemyProjectStore(session), audit=audit)
-    try:
-        yield service
-    except BaseException:
-        await session.rollback()
-        raise
-    else:
-        await session.commit()
+    yield ProjectService(SQLAlchemyProjectStore(session), audit=audit)

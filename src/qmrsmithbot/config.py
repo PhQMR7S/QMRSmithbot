@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import SecretStr, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     telegram_factory_bot_token: SecretStr = SecretStr("")
     platform_required_channel: str = ""
     platform_required_channel_enabled: bool = False
+    auth_dev_bootstrap_enabled: bool = True
+    session_absolute_ttl_minutes: int = Field(default=480, ge=5, le=10080)
+    session_idle_ttl_minutes: int = Field(default=30, ge=5, le=1440)
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 
@@ -21,7 +24,8 @@ class Settings(BaseSettings):
         environment = self.app_env.strip().lower()
         if environment not in {"development", "test", "staging", "production"}:
             raise ValueError("app_env must be development, test, staging, or production")
-
+        if self.session_idle_ttl_minutes >= self.session_absolute_ttl_minutes:
+            raise ValueError("session idle TTL must be shorter than absolute TTL")
         if environment == "production":
             if not self.telegram_factory_bot_token.get_secret_value():
                 raise ValueError("TELEGRAM_FACTORY_BOT_TOKEN is required in production")
@@ -29,7 +33,8 @@ class Settings(BaseSettings):
                 "postgresql+asyncpg://qmrsmith:qmrsmith@localhost:5432/qmrsmith"
             ):
                 raise ValueError("DATABASE_URL must be explicitly configured in production")
-
+            if self.auth_dev_bootstrap_enabled:
+                raise ValueError("AUTH_DEV_BOOTSTRAP_ENABLED must be false in production")
         if self.platform_required_channel_enabled and not self.platform_required_channel.strip():
             raise ValueError(
                 "PLATFORM_REQUIRED_CHANNEL is required when platform access protection is enabled"

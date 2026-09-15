@@ -9,6 +9,28 @@ from pydantic import BaseModel, ConfigDict, Field
 from qmrsmithbot.domain.models import BotStatus
 
 
+class DevSessionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: int = Field(gt=0)
+
+
+class SessionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    access_token: str
+    token_type: str
+    expires_at: datetime
+    session_id: UUID
+
+
+class SessionUserResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: int
+    session_id: UUID
+
+
 class ProjectCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -20,6 +42,7 @@ class ProjectResponse(BaseModel):
 
     id: UUID
     owner_id: int
+    tenant_id: UUID
     name: str
     active_version: int | None
     status: BotStatus
