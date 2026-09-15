@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from qmrsmithbot.auth.models import TenantRole
 from qmrsmithbot.domain.models import BotStatus
 
 
@@ -29,6 +30,77 @@ class SessionUserResponse(BaseModel):
 
     user_id: int
     session_id: UUID
+
+
+class OIDCStartResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    authorization_url: str
+
+
+class OIDCCallbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(min_length=1, max_length=4096)
+    state: str = Field(min_length=1, max_length=512)
+
+
+class TenantCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=120)
+    slug: str = Field(min_length=1, max_length=120)
+
+
+class TenantResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    name: str
+    slug: str
+
+
+class TenantMemberResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tenant_id: UUID
+    user_id: int
+    role: TenantRole
+    username: str | None
+    email: str | None
+
+
+class MemberRoleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: TenantRole
+
+
+class TenantInvitationCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(min_length=3, max_length=320)
+    role: TenantRole = TenantRole.VIEWER
+
+
+class TenantInvitationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    invitation_id: UUID
+    expires_at: datetime
+    invitation_token: str
+
+
+class TenantInvitationAcceptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    invitation_token: str = Field(min_length=1, max_length=512)
+
+
+class OwnershipTransferRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    new_owner_user_id: int = Field(gt=0)
 
 
 class ProjectCreateRequest(BaseModel):
