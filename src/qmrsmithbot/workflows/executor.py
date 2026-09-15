@@ -3,27 +3,67 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
+from uuid import uuid4
 
 from qmrsmithbot.workflows.schema import WorkflowDefinition, WorkflowNode
 
 
+@dataclass(frozen=True, slots=True)
+class ExecutionIdentity:
+    """Immutable identity binding one execution to its tenant and published version."""
+
+    tenant_id: str
+    project_id: str
+    update_id: int
+    workflow_version_id: str
+    workflow_version: int
+    trace_id: str
+    chat_id: int | None = None
+
+
 @dataclass(slots=True)
 class ExecutionContext:
-    """Mutable execution state with bounded user-controlled data."""
+    """Mutable workflow state with immutable execution identity and bounded data."""
 
+    identity: ExecutionIdentity | None = None
+    event: Mapping[str, Any] = field(default_factory=dict)
     values: dict[str, Any] = field(default_factory=dict)
     visited: list[str] = field(default_factory=list)
     steps: int = 0
-    trace_id: str | None = None
-    tenant_id: str | None = None
-    project_id: str | None = None
-    update_id: int | None = None
-    workflow_version_id: str | None = None
-    chat_id: int | None = None
     started_monotonic: float = field(default_factory=time.monotonic)
+    deadline_monotonic: float | None = None
+
+    @property
+    def trace_id(self) -> str | None:
+        return self.identity.trace_id if self.identity else None
+
+    @property
+    def tenant_id(self) -> str | None:
+        return self.identity.tenant_id if self.identity else None
+
+    @property
+    def project_id(self) -> str | None:
+        return self.identity.project_id if self.identity else None
+
+    @property
+    def update_id(self) -> int | None:
+        return self.identity.update_id if self.identity else None
+
+    @property
+    def workflow_version_id(self) -> str | None:
+        return self.identity.workflow_version_id if self.identity else None
+
+    @property
+    def chat_id(self) -> int | None:
+        return self.identity.chat_id if self.identity else None
+
+    def remaining_seconds(self) -> float | None:
+        if self.deadline_monotonic is None:
+            return None
+        return max(0.0, self.deadline_monotonic - time.monotonic())
 
 
 class DispatchPlanLike(Protocol):
@@ -31,6 +71,12 @@ class DispatchPlanLike(Protocol):
 
     definition: WorkflowDefinition
     triggers: tuple[Any, ...]
+    project_id: Any
+    tenant_id: Any
+    update_id: int
+    workflow_version_id: Any
+    workflow_version: int
+    event: Any
 
 
 Handler = Callable[[WorkflowNode, ExecutionContext], Awaitable[None]]
@@ -80,6 +126,7 @@ class WorkflowExecutor:
         context: ExecutionContext | None = None,
     ) -> ExecutionContext:
         execution = context or ExecutionContext()
+        self._initialize_identity(workflow, execution)
         self._check_value_budget(execution.values)
         definition, matched = self._resolve_input(workflow)
         nodes = {node.id: node for node in definition.nodes}
@@ -115,22 +162,56 @@ class WorkflowExecutor:
 
     async def _run_handler(self, handler: Handler, node: WorkflowNode, context: ExecutionContext) -> None:
         coroutine = handler(node, context)
-        if self.handler_timeout_seconds is None:
+        timeout = self.handler_timeout_seconds
+        remaining = context.remaining_seconds()
+        if remaining is not None:
+            timeout = remaining if timeout is None else min(timeout, remaining)
+        if timeout is None:
             await coroutine
             return
+        if timeout <= 0:
+            coroutine.close()
+            raise WorkflowLimitExceeded("workflow execution time limit exceeded")
         try:
-            await asyncio.wait_for(coroutine, timeout=self.handler_timeout_seconds)
+            await asyncio.wait_for(coroutine, timeout=timeout)
         except TimeoutError as exc:
             raise WorkflowLimitExceeded(
                 f"workflow handler timed out for node: {node.id}"
             ) from exc
 
     def _check_execution_budget(self, context: ExecutionContext) -> None:
+        remaining = context.remaining_seconds()
+        if remaining is not None and remaining <= 0:
+            raise WorkflowLimitExceeded("workflow execution time limit exceeded")
         if (
             self.execution_timeout_seconds is not None
             and time.monotonic() - context.started_monotonic >= self.execution_timeout_seconds
         ):
             raise WorkflowLimitExceeded("workflow execution time limit exceeded")
+
+    @staticmethod
+    def _initialize_identity(
+        workflow: WorkflowDefinition | DispatchPlanLike,
+        context: ExecutionContext,
+    ) -> None:
+        if not isinstance(workflow, WorkflowDefinition):
+            if context.identity is None:
+                context.identity = ExecutionIdentity(
+                    tenant_id=str(workflow.tenant_id),
+                    project_id=str(workflow.project_id),
+                    update_id=workflow.update_id,
+                    workflow_version_id=str(workflow.workflow_version_id),
+                    workflow_version=workflow.workflow_version,
+                    trace_id=str(uuid4()),
+                    chat_id=getattr(workflow.event, "chat_id", None),
+                )
+            elif (
+                context.identity.tenant_id != str(workflow.tenant_id)
+                or context.identity.project_id != str(workflow.project_id)
+                or context.identity.update_id != workflow.update_id
+                or context.identity.workflow_version_id != str(workflow.workflow_version_id)
+            ):
+                raise WorkflowExecutionError("execution context identity does not match dispatch plan")
 
     def _check_value_budget(self, values: dict[str, Any]) -> None:
         if len(values) > self.max_values:
