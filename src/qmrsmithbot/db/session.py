@@ -17,3 +17,7 @@ async def get_session() -> AsyncIterator[AsyncSession]:
             raise
         else:
             await session.commit()
+
+
+async def close_database() -> None:
+    await engine.dispose()

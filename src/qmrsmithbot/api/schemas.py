@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from qmrsmithbot.auth.models import TenantRole
 from qmrsmithbot.domain.models import BotStatus
@@ -145,3 +145,18 @@ class WorkflowVersionResponse(BaseModel):
     version: int
     definition: dict[str, Any]
     published_at: datetime | None
+
+
+class TelegramBotProvisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    bot_token: SecretStr = Field(min_length=1, max_length=512)
+
+
+class TelegramBotProvisionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: UUID
+    telegram_bot_id: int
+    telegram_username: str | None
+    webhook_secret: str

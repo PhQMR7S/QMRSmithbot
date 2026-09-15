@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from qmrsmithbot.workflows.executor import (
@@ -129,3 +131,61 @@ async def test_execution_limit_is_enforced_for_many_distinct_nodes() -> None:
 def test_executor_rejects_invalid_step_limit() -> None:
     with pytest.raises(ValueError, match="max_steps"):
         WorkflowExecutor(max_steps=0)
+
+
+def test_executor_rejects_invalid_resource_limits() -> None:
+    with pytest.raises(ValueError, match="max_values"):
+        WorkflowExecutor(max_values=0)
+    with pytest.raises(ValueError, match="max_value_bytes"):
+        WorkflowExecutor(max_value_bytes=1023)
+    with pytest.raises(ValueError, match="handler_timeout_seconds"):
+        WorkflowExecutor(handler_timeout_seconds=0)
+    with pytest.raises(ValueError, match="execution_timeout_seconds"):
+        WorkflowExecutor(execution_timeout_seconds=0)
+
+
+async def test_value_count_budget_is_enforced() -> None:
+    workflow = WorkflowDefinition.model_validate(
+        {"nodes": [{"id": "start", "type": "trigger.command"}]}
+    )
+
+    async def handle(node: WorkflowNode, context: ExecutionContext) -> None:
+        context.values.update({"a": 1, "b": 2})
+
+    with pytest.raises(WorkflowExecutionError, match="value count limit"):
+        await WorkflowExecutor({"trigger.command": handle}, max_values=1).run(workflow)
+
+
+async def test_value_size_budget_is_enforced() -> None:
+    workflow = WorkflowDefinition.model_validate(
+        {"nodes": [{"id": "start", "type": "trigger.command"}]}
+    )
+
+    async def handle(node: WorkflowNode, context: ExecutionContext) -> None:
+        context.values["payload"] = "x" * 2048
+
+    with pytest.raises(WorkflowExecutionError, match="value size limit"):
+        await WorkflowExecutor({"trigger.command": handle}, max_value_bytes=1024).run(
+            workflow,
+            ExecutionContext(),
+        )
+
+
+async def test_handler_timeout_is_enforced() -> None:
+    workflow = WorkflowDefinition.model_validate(
+        {
+            "nodes": [
+                {"id": "start", "type": "trigger.command"},
+                {"id": "slow", "type": "action.message"},
+            ],
+            "edges": [{"source": "start", "target": "slow"}],
+        }
+    )
+
+    async def handle(node: WorkflowNode, context: ExecutionContext) -> None:
+        await asyncio.sleep(0.05)
+
+    with pytest.raises(WorkflowExecutionError, match="handler timed out"):
+        await WorkflowExecutor(
+            {"action.message": handle}, handler_timeout_seconds=0.001
+        ).run(workflow)

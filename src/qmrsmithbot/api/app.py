@@ -5,6 +5,8 @@ from fastapi.responses import JSONResponse
 
 from qmrsmithbot.api.auth import router as auth_router
 from qmrsmithbot.api.projects import router as projects_router
+from qmrsmithbot.api.telegram import router as telegram_router
+from qmrsmithbot.api.telegram_webhook import router as telegram_webhook_router
 from qmrsmithbot.api.tenants import router as tenants_router
 from qmrsmithbot.auth.authorization import AuthorizationDenied
 from qmrsmithbot.auth.service import (
@@ -13,6 +15,7 @@ from qmrsmithbot.auth.service import (
     TenantAdministrationError,
     TenantSelectionRequired,
 )
+from qmrsmithbot.db.session import close_database
 from qmrsmithbot.projects.service import (
     InvalidWorkflowError,
     ProjectNotFoundError,
@@ -24,18 +27,25 @@ from qmrsmithbot.request_context import (
     reset_request_id,
     set_request_id,
 )
+from qmrsmithbot.telegram.provisioning import TelegramBotAlreadyAssigned, TelegramProvisioningError
+from qmrsmithbot.telegram.webhook_service import TelegramWebhookError, TelegramWebhookNotReady
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    yield
-    await close_rate_limiter()
+    try:
+        yield
+    finally:
+        await close_rate_limiter()
+        await close_database()
 
 
 app = FastAPI(title="QMRSmithbot", version="0.1.0", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(projects_router)
 app.include_router(tenants_router)
+app.include_router(telegram_router)
+app.include_router(telegram_webhook_router)
 
 
 @app.middleware("http")
@@ -92,6 +102,26 @@ async def tenant_administration_error(_: Request, exc: TenantAdministrationError
 @app.exception_handler(TenantAccessError)
 async def tenant_access_error(_: Request, exc: TenantAccessError) -> JSONResponse:
     return JSONResponse(status_code=403, content={"detail": str(exc)})
+
+
+@app.exception_handler(TelegramBotAlreadyAssigned)
+async def telegram_bot_already_assigned(_: Request, exc: TelegramBotAlreadyAssigned) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@app.exception_handler(TelegramProvisioningError)
+async def telegram_provisioning_error(_: Request, exc: TelegramProvisioningError) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+@app.exception_handler(TelegramWebhookNotReady)
+async def telegram_webhook_not_ready(_: Request, exc: TelegramWebhookNotReady) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@app.exception_handler(TelegramWebhookError)
+async def telegram_webhook_error(_: Request, exc: TelegramWebhookError) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
 
 
 @app.get("/health")
