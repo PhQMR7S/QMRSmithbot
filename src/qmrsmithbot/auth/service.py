@@ -135,6 +135,20 @@ class SessionService:
             record.revoked_at = datetime.now(UTC)
             await self.session.flush()
 
+    async def revoke_all(self, *, user_id: int) -> int:
+        result = await self.session.execute(
+            select(SessionRecord).where(
+                SessionRecord.user_id == user_id,
+                SessionRecord.revoked_at.is_(None),
+            )
+        )
+        records = list(result.scalars())
+        now = datetime.now(UTC)
+        for record in records:
+            record.revoked_at = now
+        await self.session.flush()
+        return len(records)
+
     async def revoke_all_except(self, *, user_id: int, session_id: UUID) -> int:
         result = await self.session.execute(
             select(SessionRecord).where(
@@ -178,7 +192,9 @@ class TenantService:
     def normalize_slug(cls, slug: str) -> str:
         normalized = slug.strip().lower()
         if not cls._slug_pattern.fullmatch(normalized):
-            raise TenantAdministrationError("tenant slug must contain only lowercase letters, digits, and hyphens")
+            raise TenantAdministrationError(
+                "tenant slug must contain only lowercase letters, digits, and hyphens"
+            )
         return normalized
 
     async def ensure_personal_tenant(self, user_id: int) -> Tenant:
@@ -277,7 +293,11 @@ class TenantService:
         )
         if record is None:
             return None
-        return TenantMembership(tenant_id=record.tenant_id, user_id=record.user_id, role=TenantRole(record.role))
+        return TenantMembership(
+            tenant_id=record.tenant_id,
+            user_id=record.user_id,
+            role=TenantRole(record.role),
+        )
 
     async def list_tenants(self, user_id: int) -> list[Tenant]:
         rows = await self.session.execute(
@@ -399,13 +419,15 @@ class TenantService:
             raise TenantAdministrationError("invitation is invalid or expired")
         verified_users = list(
             await self.session.scalars(
-                select(IdentityRecord.user_id).where(
+                select(IdentityRecord.user_id)
+                .where(
                     IdentityRecord.email == record.email,
                     IdentityRecord.email_verified.is_(True),
-                ).distinct()
+                )
+                .distinct()
             )
         )
-        if verified_users != [user_id]:
+        if len(set(verified_users)) != 1 or verified_users[0] != user_id:
             raise TenantAdministrationError("invitation email does not match the authenticated identity")
         membership = await self.session.get(
             TenantMembershipRecord, {"tenant_id": record.tenant_id, "user_id": user_id}
@@ -432,7 +454,9 @@ class TenantService:
         if new_role == current_role:
             return
         if new_role == TenantRole.OWNER:
-            raise TenantAdministrationError("owner transfer must use the dedicated ownership transfer operation")
+            raise TenantAdministrationError(
+                "owner transfer must use the dedicated ownership transfer operation"
+            )
         if ROLE_RANK[actor_role] <= ROLE_RANK[current_role]:
             raise TenantAdministrationError("actor cannot change an equal or higher privilege role")
         if ROLE_RANK[actor_role] <= ROLE_RANK[new_role]:
