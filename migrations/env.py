@@ -8,8 +8,10 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from qmrsmithbot.config import settings
-from qmrsmithbot.db import models  # noqa: F401
-from qmrsmithbot.db import telegram_runtime_models  # noqa: F401
+from qmrsmithbot.db import (
+    models,  # noqa: F401
+    telegram_runtime_models,  # noqa: F401
+)
 from qmrsmithbot.db.base import Base
 
 config = context.config
