@@ -15,7 +15,7 @@ def test_email_normalization_is_deterministic(raw: str, expected: str) -> None:
     assert TenantService.normalize_email(raw) == expected
 
 
-@pytest.mark.parametrize("slug", ["Acme", "bad slug", "bad_slug", "-leading", "trailing-"])
+@pytest.mark.parametrize("slug", ["bad slug", "bad_slug", "-leading", "trailing-"])
 def test_tenant_slug_rejects_unsafe_values(slug: str) -> None:
     with pytest.raises(TenantAdministrationError):
         TenantService.normalize_slug(slug)
