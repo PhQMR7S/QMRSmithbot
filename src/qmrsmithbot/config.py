@@ -25,7 +25,9 @@ class Settings(BaseSettings):
         if environment == "production":
             if not self.telegram_factory_bot_token.get_secret_value():
                 raise ValueError("TELEGRAM_FACTORY_BOT_TOKEN is required in production")
-            if self.database_url == "postgresql+asyncpg://qmrsmith:qmrsmith@localhost:5432/qmrsmith":
+            if self.database_url == (
+                "postgresql+asyncpg://qmrsmith:qmrsmith@localhost:5432/qmrsmith"
+            ):
                 raise ValueError("DATABASE_URL must be explicitly configured in production")
 
         if self.platform_required_channel_enabled and not self.platform_required_channel.strip():
