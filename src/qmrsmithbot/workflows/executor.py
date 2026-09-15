@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -16,29 +17,42 @@ class ExecutionContext:
 Handler = Callable[[WorkflowNode, ExecutionContext], Awaitable[None]]
 
 
-class WorkflowExecutor:
-    """Small deterministic execution core; Telegram/HTTP adapters live outside it."""
+class WorkflowExecutionError(RuntimeError):
+    """Raised when a workflow cannot be executed safely."""
 
-    def __init__(self, handlers: dict[str, Handler] | None = None) -> None:
+
+class WorkflowExecutor:
+    """Deterministic, bounded workflow execution independent of Telegram adapters."""
+
+    def __init__(self, handlers: dict[str, Handler] | None = None, *, max_steps: int = 1000) -> None:
+        if max_steps < 1:
+            raise ValueError("max_steps must be positive")
         self.handlers = handlers or {}
+        self.max_steps = max_steps
 
     async def run(self, workflow: WorkflowDefinition, context: ExecutionContext) -> ExecutionContext:
+        nodes = {node.id: node for node in workflow.nodes}
         outgoing: dict[str, list[str]] = {}
         for edge in workflow.edges:
             outgoing.setdefault(edge.source, []).append(edge.target)
 
-        queue = [node.id for node in workflow.nodes if node.type.startswith("trigger.")]
-        nodes = {node.id: node for node in workflow.nodes}
-
+        queue = deque(node.id for node in workflow.nodes if node.type.startswith("trigger."))
+        steps = 0
         while queue:
-            node_id = queue.pop(0)
+            node_id = queue.popleft()
             if node_id in context.visited:
                 continue
+            if node_id not in nodes:
+                raise WorkflowExecutionError(f"unknown node: {node_id}")
+            steps += 1
+            if steps > self.max_steps:
+                raise WorkflowExecutionError("workflow execution step limit exceeded")
+
             node = nodes[node_id]
             handler = self.handlers.get(node.type)
             if handler is not None:
                 await handler(node, context)
             context.visited.append(node_id)
-            queue.extend(outgoing.get(node_id, []))
+            queue.extend(outgoing.get(node_id, ()))
 
         return context
