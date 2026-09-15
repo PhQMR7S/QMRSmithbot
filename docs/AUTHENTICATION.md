@@ -1,71 +1,63 @@
 # Authentication, Identity, Tenant Security
 
-QMRSmithbot now has a dedicated security boundary between an external identity and tenant-scoped application resources.
+## Security chain
 
-## Request trust chain
+`User → Identity → Session/Token → Principal → Tenant → Membership/Role → Permission → Project`
 
-```text
-User
-  ↓
-Identity (provider + subject)
-  ↓
-Server-side Session
-  ↓
-Bearer Session Token
-  ↓
-Principal (user_id + session_id)
-  ↓
-Tenant Context
-  ↓
-Tenant Membership / Role
-  ↓
-Permission
-  ↓
-Tenant-scoped Project
-```
+### User
 
-## Identity
+A `users` row is the durable application actor. Telegram identity and future dashboard identity providers map to this actor rather than being used directly as authorization context.
 
-`users` remains the internal account record. `identities` maps an external authentication provider and immutable subject to exactly one user. The current development bootstrap uses `provider=development`; production must use a real authentication provider before enabling access.
+### Identity
 
-## Sessions
+`identities` stores an external provider plus immutable subject. The `(provider, subject)` pair is unique so one external identity cannot silently map to multiple users.
 
-Session tokens are opaque, cryptographically random values. Only a SHA-256 hash is persisted. Sessions have both an absolute expiration and an idle timeout and can be revoked server-side. Raw tokens are never written to the database.
+### Session / Token
 
-The API accepts the token only through `Authorization: Bearer <token>`. Project endpoints do not accept the old user-ID header as an authentication mechanism.
+Sessions use opaque, high-entropy bearer tokens. Only a SHA-256 token hash is persisted. Sessions have both absolute and idle expiration and support server-side revocation. Raw tokens are never logged or stored in database columns.
 
-## Development bootstrap
+The development bootstrap endpoint creates a development identity/session only when `APP_ENV` is not `production` and `AUTH_DEV_BOOTSTRAP_ENABLED=true`. Production configuration rejects that flag and therefore cannot accidentally expose the bootstrap path.
 
-`POST /api/v1/auth/dev/session` exists only for development/test environments. It creates the development identity, personal tenant, and session in one transaction. It is explicitly disabled in production by configuration validation.
+A production identity-provider adapter remains an explicit integration boundary; there is no fallback from production authentication to a user-supplied header.
 
-## Tenants
+### Tenant
 
-Every authenticated development user receives a personal tenant. A user can later belong to multiple tenants through `tenant_memberships` with one of four roles:
+Every project belongs to exactly one tenant. Tenant membership is the authoritative relationship between an authenticated user and a tenant. A tenant context may be selected only when the authenticated user is a member of that tenant.
 
-- `owner`
-- `admin`
-- `editor`
-- `viewer`
+If a user belongs to multiple tenants, an omitted tenant context is rejected instead of guessing. This prevents accidental cross-workspace operations.
 
-When a user belongs to more than one tenant, requests must provide `X-QMRSmith-Tenant-ID`.
+### Permissions
 
-## Permissions
+Roles are mapped to an explicit permission set:
 
-Authorization is deny-by-default and centralized in `AuthorizationService`:
+- `owner`: all tenant permissions
+- `admin`: project lifecycle + tenant/member management
+- `editor`: project read/write/publish
+- `viewer`: project read only
 
-| Role | Read | Write | Publish | Tenant management | Member management |
-| --- | --- | --- | --- | --- | --- |
-| Owner | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Admin | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Editor | ✓ | ✓ | ✓ | — | — |
-| Viewer | ✓ | — | — | — | — |
+Authorization is deny-by-default. Project endpoints check the authenticated principal, tenant membership, permission, and project tenant scope before executing the operation.
 
-The API checks the permission before invoking project operations. The project persistence layer also filters by `tenant_id`, providing a second resource-scope boundary against IDOR/cross-tenant access.
+## Data isolation
 
-## Migration safety
+Project persistence queries use `tenant_id` rather than trusting a caller-provided owner ID. Service methods first establish tenant ownership of the project and then operate within that scope. A project outside the selected tenant is treated as not found.
 
-Migration `0003_identity_tenant_security` creates the identity/session/tenant tables, creates personal tenants for existing users, backfills existing projects to those tenants, then makes `bot_projects.tenant_id` non-null. Existing audit records are backfilled with the corresponding tenant when a project link exists.
+The database also enforces the tenant foreign key and non-null project tenant scope.
 
-## Production gate
+## Audit boundary
 
-This phase intentionally does **not** pretend that a real production identity provider exists. Production authentication remains fail-closed until a real provider adapter is wired. Telegram Runtime is a separate later phase and is not used as a shortcut for dashboard authentication.
+Security-sensitive project lifecycle operations remain auditable. Audit records can reference actor, tenant, project, request ID, action, metadata, and detail. Request-ID propagation is the next security-control-plane increment so that every security-sensitive mutation can be correlated end-to-end.
+
+## Hardening checklist
+
+Before Telegram runtime is started, the platform must have:
+
+1. Stable authentication/identity boundary.
+2. Server-side session validation and revocation.
+3. Tenant membership and explicit RBAC.
+4. Tenant-scoped project persistence.
+5. Negative cross-tenant authorization tests.
+6. Request-ID/audit correlation.
+7. Redis-backed rate limiting with fail-closed behavior for security-sensitive endpoints.
+8. Explicit production identity-provider configuration.
+
+Telegram provisioning/runtime is intentionally downstream of these controls.
