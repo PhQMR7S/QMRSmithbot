@@ -80,6 +80,7 @@ class WorkflowExecutor:
         context: ExecutionContext | None = None,
     ) -> ExecutionContext:
         execution = context or ExecutionContext()
+        self._check_value_budget(execution.values)
         definition, matched = self._resolve_input(workflow)
         nodes = {node.id: node for node in definition.nodes}
         outgoing: dict[str, list[tuple[str, str | None]]] = {}
@@ -104,7 +105,7 @@ class WorkflowExecutor:
                 raise WorkflowExecutionError(f"no handler registered for node type: {node.type}")
             if handler is not None:
                 await self._run_handler(handler, node, execution)
-                self._check_value_budget(execution.values)
+            self._check_value_budget(execution.values)
             execution.visited.append(node_id)
 
             for target, condition in outgoing.get(node_id, []):
