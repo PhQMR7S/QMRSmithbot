@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import func, select, update
@@ -79,13 +80,13 @@ class SQLAlchemyProjectStore(ProjectStore):
         if project is None:
             raise LookupError("project was not found")
 
-        version_exists = await self.session.scalar(
-            select(WorkflowVersionRecord.id).where(
+        version_record = await self.session.scalar(
+            select(WorkflowVersionRecord).where(
                 WorkflowVersionRecord.project_id == project_id,
                 WorkflowVersionRecord.version == version,
             )
         )
-        if version_exists is None:
+        if version_record is None:
             raise LookupError(f"workflow version {version} was not found")
 
         await self.session.execute(
@@ -93,6 +94,8 @@ class SQLAlchemyProjectStore(ProjectStore):
             .where(BotProjectRecord.id == project_id)
             .values(active_version=version, status="running")
         )
+        if version_record.published_at is None:
+            version_record.published_at = datetime.now(timezone.utc)
         await self.session.flush()
         project.active_version = version
         project.status = "running"
