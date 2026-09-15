@@ -3,7 +3,12 @@ from uuid import uuid4
 import pytest
 
 from qmrsmithbot.telegram.dispatcher import DispatchPlan, TelegramEvent, TriggerMatch
-from qmrsmithbot.workflows.executor import ExecutionContext, WorkflowExecutionError, WorkflowExecutor, WorkflowLimitExceeded
+from qmrsmithbot.workflows.executor import (
+    ExecutionContext,
+    WorkflowExecutionError,
+    WorkflowExecutor,
+    WorkflowLimitExceeded,
+)
 from qmrsmithbot.workflows.schema import WorkflowDefinition
 
 
