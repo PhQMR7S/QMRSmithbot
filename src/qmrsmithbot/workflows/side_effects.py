@@ -6,7 +6,12 @@ from typing import Any, Protocol
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError, TelegramRetryAfter, TelegramServerError
+from aiogram.exceptions import (
+    TelegramBadRequest,
+    TelegramNetworkError,
+    TelegramRetryAfter,
+    TelegramServerError,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmrsmithbot.telegram.client import TelegramBotClientFactory
@@ -50,7 +55,12 @@ class SideEffectLimits:
 class TelegramActionHandler(ActionHandler):
     action_type: str
 
-    def __init__(self, session: AsyncSession, *, limits: SideEffectLimits | None = None) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        limits: SideEffectLimits | None = None,
+    ) -> None:
         self.client_factory = TelegramBotClientFactory(session)
         self.limits = limits or SideEffectLimits()
 
@@ -110,7 +120,7 @@ class TelegramActionHandler(ActionHandler):
             return ActionExecutionError(
                 "Telegram requested a retry", kind=ActionFailureKind.RETRYABLE
             )
-        if isinstance(exc, (TelegramServerError, TelegramNetworkError, asyncio.TimeoutError)):
+        if isinstance(exc, (TelegramServerError, TelegramNetworkError, TimeoutError)):
             return ActionExecutionError(
                 "Telegram request failed temporarily", kind=ActionFailureKind.RETRYABLE
             )
@@ -125,7 +135,11 @@ class SendMessageActionHandler(TelegramActionHandler):
     action_type = "action.message"
 
     async def execute(
-        self, *, node: WorkflowNode, context: ExecutionContext, attempt: int
+        self,
+        *,
+        node: WorkflowNode,
+        context: ExecutionContext,
+        attempt: int,
     ) -> ActionResult:
         config = node.config
         chat_id = self._chat_id(context, config)
@@ -148,7 +162,11 @@ class EditMessageActionHandler(TelegramActionHandler):
     action_type = "action.edit_message"
 
     async def execute(
-        self, *, node: WorkflowNode, context: ExecutionContext, attempt: int
+        self,
+        *,
+        node: WorkflowNode,
+        context: ExecutionContext,
+        attempt: int,
     ) -> ActionResult:
         config = node.config
         chat_id = self._chat_id(context, config)
@@ -176,7 +194,11 @@ class DeleteMessageActionHandler(TelegramActionHandler):
     action_type = "action.delete_message"
 
     async def execute(
-        self, *, node: WorkflowNode, context: ExecutionContext, attempt: int
+        self,
+        *,
+        node: WorkflowNode,
+        context: ExecutionContext,
+        attempt: int,
     ) -> ActionResult:
         config = node.config
         chat_id = self._chat_id(context, config)
@@ -198,7 +220,12 @@ class DeleteMessageActionHandler(TelegramActionHandler):
 class HttpActionHandler(ActionHandler):
     action_type = "action.http"
 
-    def __init__(self, transport: HttpTransport, *, limits: SideEffectLimits | None = None) -> None:
+    def __init__(
+        self,
+        transport: HttpTransport,
+        *,
+        limits: SideEffectLimits | None = None,
+    ) -> None:
         self.transport = transport
         self.limits = limits or SideEffectLimits()
 
@@ -259,7 +286,11 @@ class HttpActionHandler(ActionHandler):
         return body
 
     async def execute(
-        self, *, node: WorkflowNode, context: ExecutionContext, attempt: int
+        self,
+        *,
+        node: WorkflowNode,
+        context: ExecutionContext,
+        attempt: int,
     ) -> ActionResult:
         config = node.config
         raw_url = config.get("url")
