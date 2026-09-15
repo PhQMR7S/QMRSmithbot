@@ -13,6 +13,10 @@ class NonRetryableTelegramUpdateError(RuntimeError):
     """Raised when an accepted inbox item can never be processed successfully."""
 
 
+class RetryableTelegramUpdateError(RuntimeError):
+    """Raised when an update may succeed on a later attempt."""
+
+
 @dataclass(frozen=True, slots=True)
 class TelegramRuntimeContext:
     project_id: UUID
