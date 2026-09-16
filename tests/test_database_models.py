@@ -14,6 +14,10 @@ from qmrsmithbot.db.telegram_runtime_models import (
     TelegramUpdateInboxRecord,
     TelegramWebhookStateRecord,
 )
+from qmrsmithbot.db.workflow_runtime_models import (
+    ActionLedgerRecord,
+    WorkflowExecutionRecord,
+)
 
 
 def test_database_schema_contains_expected_tables() -> None:
@@ -30,6 +34,8 @@ def test_database_schema_contains_expected_tables() -> None:
         "telegram_webhook_states",
         "telegram_update_inbox",
         "workflow_versions",
+        "workflow_executions",
+        "action_ledger",
         "audit_events",
     }
     assert expected == {table.name for table in BotProjectRecord.metadata.tables.values()}
@@ -77,6 +83,16 @@ def test_workflow_version_number_is_positive() -> None:
     assert "ck_workflow_versions_version_positive" in names
 
 
+def test_workflow_execution_has_update_version_uniqueness() -> None:
+    constraints = WorkflowExecutionRecord.__table__.constraints
+    assert any(
+        constraint.name == "uq_workflow_execution_update_version"
+        and {column.name for column in constraint.columns}
+        == {"project_id", "update_id", "workflow_version_id"}
+        for constraint in constraints
+    )
+
+
 def test_audit_event_preserves_project_actor_and_tenant_links() -> None:
     foreign_keys = {fk.target_fullname for fk in AuditEvent.__table__.foreign_keys}
     assert "users.id" in foreign_keys
@@ -119,3 +135,10 @@ def test_update_inbox_has_idempotency_and_lease_invariants() -> None:
     assert TelegramUpdateInboxRecord.__table__.c.payload.nullable is False
     assert TelegramUpdateInboxRecord.__table__.c.claimed_by.nullable is True
     assert TelegramUpdateInboxRecord.__table__.c.lease_until.nullable is True
+
+
+def test_action_ledger_is_execution_and_tenant_scoped() -> None:
+    foreign_keys = {fk.target_fullname for fk in ActionLedgerRecord.__table__.foreign_keys}
+    assert "workflow_executions.id" in foreign_keys
+    assert "bot_projects.id" in foreign_keys
+    assert "tenants.id" in foreign_keys
