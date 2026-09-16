@@ -10,6 +10,13 @@ from qmrsmithbot.db.workflow_runtime_models import ActionLedgerRecord
 from qmrsmithbot.workflows.action_retry import ActionRetryScheduler, RetrySchedule
 
 
+def test_action_ledger_exposes_retry_scheduling_columns() -> None:
+    columns = ActionLedgerRecord.__table__.c
+    assert columns.retryable.type.python_type is bool
+    assert columns.available_at.nullable is True
+    assert columns.available_at.index is True
+
+
 def test_delay_for_attempt_uses_capped_exponential_backoff() -> None:
     scheduler = ActionRetryScheduler(object(), base_delay_seconds=2, max_delay_seconds=10)  # type: ignore[arg-type]
     assert scheduler.delay_for_attempt(1) == 2
@@ -59,24 +66,34 @@ def _ledger_record(*, retryable: bool, status: str = "failed") -> ActionLedgerRe
 
 
 @pytest.mark.asyncio
-async def test_schedule_only_schedules_retryable_failed_actions() -> None:
-    retryable = _ledger_record(retryable=True)
-    terminal = _ledger_record(retryable=False)
-
+async def test_schedule_schedules_retryable_failed_actions() -> None:
+    record = _ledger_record(retryable=True)
     session = AsyncMock()
-    session.scalar.side_effect = [retryable, terminal]
+    session.scalar.return_value = record
     scheduler = ActionRetryScheduler(session, base_delay_seconds=2, max_delay_seconds=10)
 
-    scheduled = await scheduler.schedule(ledger_id=retryable.id)
-    skipped = await scheduler.schedule(ledger_id=terminal.id)
+    scheduled = await scheduler.schedule(ledger_id=record.id)
 
     assert scheduled is not None
-    assert scheduled.ledger_id == retryable.id
+    assert scheduled.ledger_id == record.id
     assert scheduled.attempt == 2
+    assert scheduled.delay_seconds == 4
     assert scheduled.available_at > datetime.now(UTC)
-    assert retryable.available_at == scheduled.available_at
-    assert skipped is not None or skipped is None
+    assert record.available_at == scheduled.available_at
     session.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_schedule_skips_terminal_failed_actions() -> None:
+    record = _ledger_record(retryable=False)
+    session = AsyncMock()
+    session.scalar.return_value = None
+    scheduler = ActionRetryScheduler(session)
+
+    scheduled = await scheduler.schedule(ledger_id=record.id)
+
+    assert scheduled is None
+    session.flush.assert_not_awaited()
 
 
 @pytest.mark.asyncio
