@@ -1,0 +1,144 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from qmrsmithbot.db.workflow_runtime_models import ActionLedgerRecord
+from qmrsmithbot.workflows.actions import ActionResult
+
+
+@dataclass(frozen=True, slots=True)
+class ActionLedgerEntry:
+    id: UUID
+    execution_id: UUID
+    tenant_id: UUID
+    project_id: UUID
+    node_id: str
+    action_type: str
+    idempotency_key: str
+    status: str
+    attempt: int
+    result_metadata: dict
+    error: str | None
+
+
+class ActionLedgerService:
+    """Durable action state and idempotency boundary for external side effects."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_or_create(
+        self,
+        *,
+        execution_id: UUID,
+        tenant_id: UUID,
+        project_id: UUID,
+        node_id: str,
+        action_type: str,
+        idempotency_key: str,
+    ) -> ActionLedgerEntry:
+        statement = (
+            insert(ActionLedgerRecord)
+            .values(
+                execution_id=execution_id,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                node_id=node_id,
+                action_type=action_type,
+                idempotency_key=idempotency_key,
+                status="pending",
+                attempt=1,
+                result_metadata={},
+            )
+            .on_conflict_do_nothing(constraint="uq_action_ledger_execution_node_key")
+        )
+        await self.session.execute(statement)
+        row = await self.session.scalar(
+            select(ActionLedgerRecord)
+            .where(
+                ActionLedgerRecord.execution_id == execution_id,
+                ActionLedgerRecord.node_id == node_id,
+                ActionLedgerRecord.idempotency_key == idempotency_key,
+            )
+        )
+        if row is None:
+            raise RuntimeError("action ledger entry could not be created or loaded")
+        return self._to_entry(row)
+
+    async def claim(self, *, ledger_id: UUID) -> ActionLedgerEntry | None:
+        now = datetime.now(UTC)
+        row = await self.session.scalar(
+            select(ActionLedgerRecord)
+            .where(
+                ActionLedgerRecord.id == ledger_id,
+                ActionLedgerRecord.status.in_(("pending", "failed")),
+            )
+            .with_for_update(skip_locked=True)
+        )
+        if row is None:
+            return None
+        row.status = "running"
+        row.started_at = now
+        row.error = None
+        await self.session.flush()
+        return self._to_entry(row)
+
+    async def complete(self, *, ledger_id: UUID, result: ActionResult) -> ActionLedgerEntry:
+        row = await self.session.scalar(
+            select(ActionLedgerRecord).where(ActionLedgerRecord.id == ledger_id).with_for_update()
+        )
+        if row is None:
+            raise RuntimeError("action ledger entry not found")
+        if row.status == "completed":
+            return self._to_entry(row)
+        if row.status != "running":
+            raise RuntimeError("action ledger entry is not running")
+        row.status = "completed"
+        row.attempt = result.attempt
+        row.result_metadata = result.metadata
+        row.completed_at = datetime.now(UTC)
+        row.error = None
+        await self.session.flush()
+        return self._to_entry(row)
+
+    async def fail(
+        self,
+        *,
+        ledger_id: UUID,
+        error: str,
+        retryable: bool,
+    ) -> ActionLedgerEntry:
+        row = await self.session.scalar(
+            select(ActionLedgerRecord).where(ActionLedgerRecord.id == ledger_id).with_for_update()
+        )
+        if row is None:
+            raise RuntimeError("action ledger entry not found")
+        row.status = "failed"
+        row.error = error[:1000]
+        if retryable:
+            row.attempt += 1
+        row.completed_at = datetime.now(UTC)
+        await self.session.flush()
+        return self._to_entry(row)
+
+    @staticmethod
+    def _to_entry(row: ActionLedgerRecord) -> ActionLedgerEntry:
+        return ActionLedgerEntry(
+            id=row.id,
+            execution_id=row.execution_id,
+            tenant_id=row.tenant_id,
+            project_id=row.project_id,
+            node_id=row.node_id,
+            action_type=row.action_type,
+            idempotency_key=row.idempotency_key,
+            status=row.status,
+            attempt=row.attempt,
+            result_metadata=row.result_metadata,
+            error=row.error,
+        )
