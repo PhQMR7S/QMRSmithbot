@@ -58,3 +58,74 @@ def test_action_ledger_service_rejects_nonpositive_lease() -> None:
             pass
         else:
             raise AssertionError("non-positive lease must be rejected")
+
+
+def _entry(**overrides):
+    values = {
+        "id": uuid4(),
+        "execution_id": uuid4(),
+        "tenant_id": uuid4(),
+        "project_id": uuid4(),
+        "node_id": "send",
+        "action_type": "action.message",
+        "idempotency_key": "key",
+        "sequence": 1,
+        "status": "running",
+        "attempt": 3,
+        "retryable": True,
+        "result_metadata": {},
+        "error": None,
+        "available_at": None,
+        "lease_expires_at": datetime.now(UTC),
+        "completed_at": None,
+    }
+    values.update(overrides)
+    return MagicMock(**values)
+
+
+def test_fail_moves_final_retry_to_dead_letter() -> None:
+    session = AsyncMock()
+    row = _entry()
+    session.scalar = AsyncMock(return_value=row)
+    service = ActionLedgerService(session)
+
+    result = asyncio.run(
+        service.fail(ledger_id=row.id, error="provider unavailable", retryable=True, max_attempts=3)
+    )
+
+    assert result.status == "dead_letter"
+    assert result.retryable is False
+    assert row.status == "dead_letter"
+    assert row.attempt == 3
+    assert row.available_at is None
+    assert row.lease_expires_at is None
+
+
+def test_cancel_only_targets_pending_or_failed_actions() -> None:
+    session = AsyncMock()
+    row = _entry(status="failed")
+    session.scalar = AsyncMock(return_value=row)
+    service = ActionLedgerService(session)
+
+    result = asyncio.run(service.cancel(ledger_id=row.id, reason="user requested cancellation"))
+
+    assert result is not None
+    assert result.status == "cancelled"
+    assert result.retryable is False
+    assert row.error == "user requested cancellation"
+
+
+def test_replay_requeues_dead_letter_without_resetting_attempt_history() -> None:
+    session = AsyncMock()
+    row = _entry(status="dead_letter", attempt=4, error="permanent failure")
+    session.scalar = AsyncMock(return_value=row)
+    service = ActionLedgerService(session)
+
+    result = asyncio.run(service.replay(ledger_id=row.id))
+
+    assert result is not None
+    assert result.status == "pending"
+    assert result.attempt == 4
+    assert result.retryable is False
+    assert row.error is None
+    assert row.lease_expires_at is None

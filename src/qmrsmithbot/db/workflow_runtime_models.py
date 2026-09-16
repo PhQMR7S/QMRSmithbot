@@ -52,7 +52,10 @@ class ActionLedgerRecord(Base):
         UniqueConstraint("execution_id", "node_id", "idempotency_key", name="uq_action_ledger_execution_node_key"),
         CheckConstraint("attempt >= 1", name="ck_action_ledger_attempt_positive"),
         CheckConstraint("sequence >= 1", name="ck_action_ledger_sequence_positive"),
-        CheckConstraint("status IN ('pending', 'running', 'completed', 'failed')", name="ck_action_ledger_status"),
+        CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed', 'cancelled', 'dead_letter')",
+            name="ck_action_ledger_status",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
