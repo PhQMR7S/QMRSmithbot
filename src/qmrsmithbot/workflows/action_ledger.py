@@ -180,26 +180,41 @@ class ActionLedgerService:
         await self.session.flush()
         return self._to_entry(row)
 
-    async def recover_expired_leases(self, *, now: datetime | None = None) -> int:
+    async def recover_expired_lease_entries(
+        self,
+        *,
+        now: datetime | None = None,
+    ) -> list[ActionLedgerEntry]:
+        """Recover expired running actions and return their durable entries."""
         current_time = now or datetime.now(UTC)
-        result = await self.session.execute(
-            update(ActionLedgerRecord)
-            .where(
-                ActionLedgerRecord.status == "running",
-                ActionLedgerRecord.lease_expires_at.is_not(None),
-                ActionLedgerRecord.lease_expires_at <= current_time,
-            )
-            .values(
-                status="failed",
-                retryable=True,
-                available_at=None,
-                lease_expires_at=None,
-                started_at=None,
-                completed_at=None,
-                error="action execution lease expired",
-            )
+        rows = list(
+            (
+                await self.session.scalars(
+                    select(ActionLedgerRecord)
+                    .where(
+                        ActionLedgerRecord.status == "running",
+                        ActionLedgerRecord.lease_expires_at.is_not(None),
+                        ActionLedgerRecord.lease_expires_at <= current_time,
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            ).all()
         )
-        return result.rowcount
+        for row in rows:
+            row.status = "failed"
+            row.retryable = True
+            row.available_at = None
+            row.lease_expires_at = None
+            row.started_at = None
+            row.completed_at = None
+            row.error = "action execution lease expired"
+        if rows:
+            await self.session.flush()
+        return [self._to_entry(row) for row in rows]
+
+    async def recover_expired_leases(self, *, now: datetime | None = None) -> int:
+        """Recover expired leases and return the number of recovered actions."""
+        return len(await self.recover_expired_lease_entries(now=now))
 
     async def complete(self, *, ledger_id: UUID, result: ActionResult) -> ActionLedgerEntry:
         row = await self.session.scalar(
