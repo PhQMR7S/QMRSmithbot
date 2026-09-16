@@ -92,7 +92,46 @@ class WorkflowExecutionStore:
         if not worker_id or len(worker_id) > 128:
             raise ValueError("worker_id must be non-empty and at most 128 characters")
         current_time = now or datetime.now(UTC)
-        lease_expires_at = current_time + timedelta(seconds=self.lease_seconds)
+        return await self._claim_row(execution_id=execution_id, worker_id=worker_id, now=current_time)
+
+    async def claim_next_resumable(
+        self,
+        *,
+        worker_id: str,
+        now: datetime | None = None,
+    ) -> WorkflowExecutionSnapshot | None:
+        """Atomically claim the oldest failed or expired execution ready for resume."""
+        if not worker_id or len(worker_id) > 128:
+            raise ValueError("worker_id must be non-empty and at most 128 characters")
+        current_time = now or datetime.now(UTC)
+        candidate = await self.session.scalar(
+            select(WorkflowExecutionRecord.id)
+            .where(
+                or_(
+                    WorkflowExecutionRecord.status == "failed",
+                    (
+                        (WorkflowExecutionRecord.status == "running")
+                        & WorkflowExecutionRecord.lease_expires_at.is_not(None)
+                        & (WorkflowExecutionRecord.lease_expires_at <= current_time)
+                    ),
+                )
+            )
+            .order_by(WorkflowExecutionRecord.updated_at, WorkflowExecutionRecord.id)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        )
+        if candidate is None:
+            return None
+        return await self._claim_row(execution_id=candidate, worker_id=worker_id, now=current_time)
+
+    async def _claim_row(
+        self,
+        *,
+        execution_id: UUID,
+        worker_id: str,
+        now: datetime,
+    ) -> WorkflowExecutionSnapshot | None:
+        lease_expires_at = now + timedelta(seconds=self.lease_seconds)
         row = await self.session.scalar(
             select(WorkflowExecutionRecord)
             .where(
@@ -100,7 +139,7 @@ class WorkflowExecutionStore:
                 WorkflowExecutionRecord.status.in_(("running", "failed")),
                 or_(
                     WorkflowExecutionRecord.lease_expires_at.is_(None),
-                    WorkflowExecutionRecord.lease_expires_at <= current_time,
+                    WorkflowExecutionRecord.lease_expires_at <= now,
                 ),
             )
             .with_for_update(skip_locked=True)
