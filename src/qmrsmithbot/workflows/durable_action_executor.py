@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from qmrsmithbot.workflows.action_ledger import ActionLedgerService
+from qmrsmithbot.workflows.action_ledger import ActionLedgerEntry, ActionLedgerService
 from qmrsmithbot.workflows.action_retry import ActionRetryScheduler
 from qmrsmithbot.workflows.actions import ActionEngine, ActionExecutionError, ActionResult
 from qmrsmithbot.workflows.executor import ExecutionContext
@@ -64,6 +65,18 @@ class DurableActionExecutor:
             idempotency_key=idempotency_key,
             sequence=sequence,
         )
+
+        if entry.status == "running" and self._lease_expired(entry):
+            await self.ledger.recover_expired_leases(now=datetime.now(UTC))
+            entry = await self.ledger.get_or_create(
+                execution_id=self.execution_id,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                node_id=node.id,
+                action_type=node.type,
+                idempotency_key=idempotency_key,
+                sequence=sequence,
+            )
         if entry.status == "completed":
             return DurableActionResult(entry.id, self._result_from_entry(entry))
 
@@ -109,6 +122,10 @@ class DurableActionExecutor:
         return DurableActionResult(completed.id, durable_result)
 
     @staticmethod
+    def _lease_expired(entry: ActionLedgerEntry) -> bool:
+        return entry.lease_expires_at is not None and entry.lease_expires_at <= datetime.now(UTC)
+
+    @staticmethod
     def _identity(context: ExecutionContext) -> tuple[UUID, UUID]:
         if not context.tenant_id or not context.project_id:
             raise ActionExecutionDeferred("action execution is missing durable identity")
@@ -124,7 +141,7 @@ class DurableActionExecutor:
         return f"{context.update_id}:{context.workflow_version_id}:{node.id}"
 
     @staticmethod
-    def _result_from_entry(entry) -> ActionResult:
+    def _result_from_entry(entry: ActionLedgerEntry) -> ActionResult:
         metadata = dict(entry.result_metadata)
         external_key = str(metadata.pop("external_key", f"ledger:{entry.id}"))
         return ActionResult(
