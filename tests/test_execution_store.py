@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -27,6 +27,8 @@ def make_row(*, status: str = "running") -> MagicMock:
     row.pending_nodes = ["send"]
     row.context_values = {"name": "QMR"}
     row.checkpoint_version = 2
+    row.lease_expires_at = None
+    row.worker_id = None
     row.error = None
     row.trace_id = "trace-1"
     row.started_at = datetime.now(UTC)
@@ -96,6 +98,75 @@ def test_checkpoint_rejects_stale_version() -> None:
         )
 
 
+def test_claim_sets_owner_and_lease() -> None:
+    session = AsyncMock()
+    row = make_row(status="failed")
+    session.scalar = AsyncMock(return_value=row)
+    store = WorkflowExecutionStore(session, lease_seconds=30)
+    now = datetime.now(UTC)
+
+    snapshot = asyncio.run(store.claim(execution_id=row.id, worker_id="worker-a", now=now))
+
+    assert snapshot.status == "running"
+    assert snapshot.worker_id == "worker-a"
+    assert snapshot.lease_expires_at == now + timedelta(seconds=30)
+    assert row.attempts == 1
+
+
+def test_claim_query_allows_only_unleased_or_expired_work() -> None:
+    session = AsyncMock()
+    row = make_row()
+    session.scalar = AsyncMock(return_value=row)
+    store = WorkflowExecutionStore(session)
+    asyncio.run(store.claim(execution_id=row.id, worker_id="worker-a"))
+
+    statement = session.scalar.await_args.args[0]
+    sql = str(statement.compile(dialect=postgresql.dialect()))
+    assert "lease_expires_at" in sql
+    assert "FOR UPDATE" in sql.upper()
+
+
+def test_claim_rejects_invalid_worker_id() -> None:
+    session = AsyncMock()
+    store = WorkflowExecutionStore(session)
+
+    with pytest.raises(ValueError, match="worker_id"):
+        asyncio.run(store.claim(execution_id=uuid4(), worker_id=""))
+
+
+def test_renew_lease_requires_current_owner() -> None:
+    session = AsyncMock()
+    row = make_row()
+    row.lease_expires_at = datetime.now(UTC) + timedelta(seconds=10)
+    row.worker_id = "worker-a"
+    session.scalar = AsyncMock(return_value=row)
+    store = WorkflowExecutionStore(session, lease_seconds=30)
+    now = datetime.now(UTC)
+
+    snapshot = asyncio.run(store.renew_lease(execution_id=row.id, worker_id="worker-a", now=now))
+
+    assert snapshot is not None
+    assert snapshot.lease_expires_at == now + timedelta(seconds=30)
+
+
+def test_recover_expired_leases_returns_work_to_failed_state() -> None:
+    session = AsyncMock()
+    row = make_row()
+    row.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    row.worker_id = "worker-a"
+    result = MagicMock()
+    result.all.return_value = [row]
+    session.scalars = AsyncMock(return_value=result)
+    store = WorkflowExecutionStore(session)
+    now = datetime.now(UTC)
+
+    assert asyncio.run(store.recover_expired_leases(now=now)) == 1
+    assert row.status == "failed"
+    assert row.lease_expires_at is None
+    assert row.worker_id is None
+    assert row.error == "workflow execution lease expired"
+
+
 def test_apply_to_context_restores_durable_state() -> None:
     session = AsyncMock()
     row = make_row()
@@ -141,6 +212,8 @@ def test_mark_completed_sets_terminal_state() -> None:
     assert snapshot.status == "completed"
     assert row.pending_nodes == []
     assert row.completed_at is not None
+    assert row.worker_id is None
+    assert row.lease_expires_at is None
 
 
 def test_mark_failed_bounds_error() -> None:
