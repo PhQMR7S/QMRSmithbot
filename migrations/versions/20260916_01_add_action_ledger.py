@@ -1,7 +1,7 @@
 """Add durable action ledger.
 
 Revision ID: 20260916_01
-Revises: 0007_telegram_runtime_worker_leases
+Revises: 0008_workflow_execution_ledger
 Create Date: 2026-09-16
 """
 from collections.abc import Sequence
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "20260916_01"
-down_revision: str | None = "0007_telegram_runtime_worker_leases"
+revision: str | None = "20260916_01"
+down_revision: str | None = "0008_workflow_execution_ledger"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -28,12 +28,27 @@ def upgrade() -> None:
         sa.Column("idempotency_key", sa.String(length=255), nullable=False),
         sa.Column("status", sa.String(length=16), nullable=False, server_default="pending"),
         sa.Column("attempt", sa.Integer(), nullable=False, server_default="1"),
-        sa.Column("result_metadata", postgresql.JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")),
+        sa.Column(
+            "result_metadata",
+            postgresql.JSONB(),
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
+        ),
         sa.Column("error", sa.Text(), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.CheckConstraint("attempt >= 1", name="ck_action_ledger_attempt_positive"),
         sa.CheckConstraint(
             "status IN ('pending', 'running', 'completed', 'failed')",
@@ -44,7 +59,10 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
-            "execution_id", "node_id", "idempotency_key", name="uq_action_ledger_execution_node_key"
+            "execution_id",
+            "node_id",
+            "idempotency_key",
+            name="uq_action_ledger_execution_node_key",
         ),
     )
     op.create_index("ix_action_ledger_execution_id", "action_ledger", ["execution_id"])
