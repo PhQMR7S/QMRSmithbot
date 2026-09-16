@@ -27,7 +27,11 @@ class WorkflowExecutionRecord(Base):
     __table_args__ = (
         UniqueConstraint("project_id", "update_id", "workflow_version_id", name="uq_workflow_execution_update_version"),
         CheckConstraint("attempts >= 0", name="ck_workflow_execution_attempts_nonnegative"),
-        CheckConstraint("status IN ('running', 'completed', 'failed')", name="ck_workflow_execution_status"),
+        CheckConstraint(
+            "status IN ('running', 'completed', 'failed', 'cancelled')",
+            name="ck_workflow_execution_status",
+        ),
+        CheckConstraint("checkpoint_version >= 0", name="ck_workflow_execution_checkpoint_nonnegative"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -39,6 +43,9 @@ class WorkflowExecutionRecord(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     visited_nodes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    pending_nodes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    context_values: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    checkpoint_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error: Mapped[str | None] = mapped_column(Text)
     trace_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
