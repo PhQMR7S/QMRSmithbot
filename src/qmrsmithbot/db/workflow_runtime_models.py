@@ -51,6 +51,7 @@ class ActionLedgerRecord(Base):
     __table_args__ = (
         UniqueConstraint("execution_id", "node_id", "idempotency_key", name="uq_action_ledger_execution_node_key"),
         CheckConstraint("attempt >= 1", name="ck_action_ledger_attempt_positive"),
+        CheckConstraint("sequence >= 1", name="ck_action_ledger_sequence_positive"),
         CheckConstraint("status IN ('pending', 'running', 'completed', 'failed')", name="ck_action_ledger_status"),
     )
 
@@ -67,6 +68,7 @@ class ActionLedgerRecord(Base):
     node_id: Mapped[str] = mapped_column(String(100), nullable=False)
     action_type: Mapped[str] = mapped_column(String(120), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     retryable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

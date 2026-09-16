@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from qmrsmithbot.db.workflow_runtime_models import ActionLedgerRecord
 from qmrsmithbot.workflows.actions import ActionResult
@@ -21,6 +22,7 @@ class ActionLedgerEntry:
     node_id: str
     action_type: str
     idempotency_key: str
+    sequence: int
     status: str
     attempt: int
     retryable: bool
@@ -30,7 +32,7 @@ class ActionLedgerEntry:
 
 
 class ActionLedgerService:
-    """Durable action state and idempotency boundary for external side effects."""
+    """Durable action state, idempotency, retry state, and execution ordering."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -44,7 +46,10 @@ class ActionLedgerService:
         node_id: str,
         action_type: str,
         idempotency_key: str,
+        sequence: int,
     ) -> ActionLedgerEntry:
+        if sequence < 1:
+            raise ValueError("action sequence must be positive")
         statement = (
             insert(ActionLedgerRecord)
             .values(
@@ -54,6 +59,7 @@ class ActionLedgerService:
                 node_id=node_id,
                 action_type=action_type,
                 idempotency_key=idempotency_key,
+                sequence=sequence,
                 status="pending",
                 attempt=1,
                 retryable=False,
@@ -75,22 +81,29 @@ class ActionLedgerService:
 
     async def claim(self, *, ledger_id: UUID) -> ActionLedgerEntry | None:
         now = datetime.now(UTC)
+        predecessor = aliased(ActionLedgerRecord)
+        predecessor_completed = ~select(predecessor.id).where(
+            predecessor.execution_id == ActionLedgerRecord.execution_id,
+            predecessor.sequence < ActionLedgerRecord.sequence,
+            predecessor.status != "completed",
+        ).exists()
         row = await self.session.scalar(
             select(ActionLedgerRecord)
             .where(
                 ActionLedgerRecord.id == ledger_id,
                 ActionLedgerRecord.status.in_(("pending", "failed")),
-                (
-                    (ActionLedgerRecord.status == "pending")
-                    | (
-                        (ActionLedgerRecord.status == "failed")
-                        & ActionLedgerRecord.retryable
-                        & (
-                            ActionLedgerRecord.available_at.is_(None)
-                            | (ActionLedgerRecord.available_at <= now)
-                        )
-                    )
+                or_(
+                    ActionLedgerRecord.status == "pending",
+                    and_(
+                        ActionLedgerRecord.status == "failed",
+                        ActionLedgerRecord.retryable,
+                        or_(
+                            ActionLedgerRecord.available_at.is_(None),
+                            ActionLedgerRecord.available_at <= now,
+                        ),
+                    ),
                 ),
+                predecessor_completed,
             )
             .with_for_update(skip_locked=True)
         )
@@ -157,6 +170,7 @@ class ActionLedgerService:
             node_id=row.node_id,
             action_type=row.action_type,
             idempotency_key=row.idempotency_key,
+            sequence=row.sequence,
             status=row.status,
             attempt=row.attempt,
             retryable=row.retryable,
