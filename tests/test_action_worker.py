@@ -81,6 +81,8 @@ def test_worker_rejects_invalid_configuration() -> None:
         ActionRetryWorker(lambda: None, processor, batch_size=0)  # type: ignore[arg-type]
     with pytest.raises(ValueError):
         ActionRetryWorker(lambda: None, processor, poll_interval_seconds=0)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        ActionRetryWorker(lambda: None, processor, lease_seconds=0)  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
@@ -97,9 +99,6 @@ async def test_run_once_recovers_schedules_claims_commits_and_dispatches(monkeyp
 
     monkeypatch.setattr(module, "ActionLedgerService", FakeLedger)
     monkeypatch.setattr(module, "ActionRetryScheduler", FakeScheduler)
-
-    async def session_factory():
-        return session
 
     class Factory:
         def __call__(self):
