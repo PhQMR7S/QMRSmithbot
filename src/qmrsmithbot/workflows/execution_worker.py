@@ -4,12 +4,11 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
 from qmrsmithbot.workflows.execution_store import (
     WorkflowExecutionSnapshot,
     WorkflowExecutionStore,
 )
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 WorkflowExecutionProcessor = Callable[[WorkflowExecutionSnapshot], Awaitable[None]]
