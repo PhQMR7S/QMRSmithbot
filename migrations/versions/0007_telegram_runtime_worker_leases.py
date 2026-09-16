@@ -32,10 +32,10 @@ def upgrade() -> None:
         "telegram_update_inbox",
         ["lease_until"],
     )
-    op.execute(
-        "ALTER TABLE telegram_update_inbox "
-        "ADD CONSTRAINT ck_telegram_update_inbox_attempts_nonnegative "
-        "CHECK (attempts >= 0)"
+    op.create_check_constraint(
+        "ck_telegram_update_inbox_attempts_nonnegative",
+        "telegram_update_inbox",
+        "attempts >= 0",
     )
 
 
