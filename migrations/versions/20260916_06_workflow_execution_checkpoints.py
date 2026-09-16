@@ -6,8 +6,8 @@ Create Date: 2026-09-16
 """
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str | None = "20260916_06"
@@ -25,11 +25,21 @@ def upgrade() -> None:
     )
     op.add_column(
         "workflow_executions",
-        sa.Column("pending_nodes", postgresql.JSONB(), nullable=False, server_default=sa.text("'[]'::jsonb")),
+        sa.Column(
+            "pending_nodes",
+            postgresql.JSONB(),
+            nullable=False,
+            server_default=sa.text("'[]'::jsonb"),
+        ),
     )
     op.add_column(
         "workflow_executions",
-        sa.Column("context_values", postgresql.JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")),
+        sa.Column(
+            "context_values",
+            postgresql.JSONB(),
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
+        ),
     )
     op.add_column(
         "workflow_executions",
@@ -43,7 +53,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint("ck_workflow_execution_checkpoint_nonnegative", "workflow_executions", type_="check")
+    op.drop_constraint(
+        "ck_workflow_execution_checkpoint_nonnegative", "workflow_executions", type_="check"
+    )
     op.drop_column("workflow_executions", "checkpoint_version")
     op.drop_column("workflow_executions", "context_values")
     op.drop_column("workflow_executions", "pending_nodes")
