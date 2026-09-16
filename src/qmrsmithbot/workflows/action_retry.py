@@ -19,9 +19,15 @@ class RetrySchedule:
 
 
 class ActionRetryScheduler:
-    """Compute and persist retry availability for retryable action failures."""
+    """Persist and evaluate retry availability for failed actions."""
 
-    def __init__(self, session: AsyncSession, *, base_delay_seconds: float = 2.0, max_delay_seconds: float = 300.0) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        base_delay_seconds: float = 2.0,
+        max_delay_seconds: float = 300.0,
+    ) -> None:
         if base_delay_seconds <= 0 or max_delay_seconds <= 0:
             raise ValueError("retry delays must be positive")
         if base_delay_seconds > max_delay_seconds:
@@ -45,9 +51,9 @@ class ActionRetryScheduler:
             return None
         delay_seconds = self.delay_for_attempt(row.attempt)
         available_at = datetime.now(UTC) + timedelta(seconds=delay_seconds)
+        row.available_at = available_at
         row.started_at = None
         row.completed_at = None
-        row.error = row.error
         await self.session.flush()
         return RetrySchedule(
             ledger_id=row.id,
@@ -55,3 +61,29 @@ class ActionRetryScheduler:
             available_at=available_at,
             delay_seconds=delay_seconds,
         )
+
+    async def claim_due(
+        self,
+        *,
+        ledger_id: UUID,
+        now: datetime | None = None,
+    ) -> ActionLedgerRecord | None:
+        current_time = now or datetime.now(UTC)
+        row = await self.session.scalar(
+            select(ActionLedgerRecord)
+            .where(
+                ActionLedgerRecord.id == ledger_id,
+                ActionLedgerRecord.status == "failed",
+                ActionLedgerRecord.available_at.is_not(None),
+                ActionLedgerRecord.available_at <= current_time,
+            )
+            .with_for_update(skip_locked=True)
+        )
+        if row is None:
+            return None
+        row.status = "running"
+        row.started_at = current_time
+        row.available_at = None
+        row.error = None
+        await self.session.flush()
+        return row
