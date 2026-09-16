@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -150,7 +150,11 @@ class ActionLedgerService:
                         ActionLedgerRecord.available_at <= current_time,
                         predecessor_completed,
                     )
-                    .order_by(ActionLedgerRecord.available_at, ActionLedgerRecord.created_at, ActionLedgerRecord.id)
+                    .order_by(
+                        ActionLedgerRecord.available_at,
+                        ActionLedgerRecord.created_at,
+                        ActionLedgerRecord.id,
+                    )
                     .limit(limit)
                     .with_for_update(skip_locked=True)
                 )
