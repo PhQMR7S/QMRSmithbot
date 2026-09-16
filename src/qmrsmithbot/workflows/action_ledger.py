@@ -33,7 +33,7 @@ class ActionLedgerEntry:
 
 
 class ActionLedgerService:
-    """Durable action state, idempotency, retry state, ordering, and leases."""
+    """Durable action state, idempotency, retry state, ordering, leases, and recovery."""
 
     def __init__(self, session: AsyncSession, *, lease_seconds: float = 60.0) -> None:
         if lease_seconds <= 0:
@@ -173,10 +173,9 @@ class ActionLedgerService:
     async def renew_lease(self, *, ledger_id: UUID) -> ActionLedgerEntry | None:
         now = datetime.now(UTC)
         row = await self.session.scalar(
-            select(ActionLedgerRecord).where(
-                ActionLedgerRecord.id == ledger_id,
-                ActionLedgerRecord.status == "running",
-            ).with_for_update(skip_locked=True)
+            select(ActionLedgerRecord)
+            .where(ActionLedgerRecord.id == ledger_id, ActionLedgerRecord.status == "running")
+            .with_for_update(skip_locked=True)
         )
         if row is None:
             return None
@@ -247,7 +246,10 @@ class ActionLedgerService:
         ledger_id: UUID,
         error: str,
         retryable: bool,
+        max_attempts: int | None = None,
     ) -> ActionLedgerEntry:
+        if max_attempts is not None and max_attempts < 1:
+            raise ValueError("max_attempts must be positive")
         row = await self.session.scalar(
             select(ActionLedgerRecord).where(ActionLedgerRecord.id == ledger_id).with_for_update()
         )
@@ -255,13 +257,76 @@ class ActionLedgerService:
             raise RuntimeError("action ledger entry not found")
         if row.status != "running":
             raise RuntimeError("action ledger entry is not running")
-        row.status = "failed"
+        will_dead_letter = retryable and max_attempts is not None and row.attempt >= max_attempts
+        row.status = "dead_letter" if will_dead_letter else "failed"
         row.error = error[:1000]
-        row.retryable = retryable
+        row.retryable = retryable and not will_dead_letter
         row.available_at = None
         row.lease_expires_at = None
-        if retryable:
+        if retryable and not will_dead_letter:
             row.attempt += 1
+        row.completed_at = None
+        await self.session.flush()
+        return self._to_entry(row)
+
+    async def cancel(self, *, ledger_id: UUID, reason: str = "action execution cancelled") -> ActionLedgerEntry | None:
+        """Cancel a not-yet-running action; running work must be stopped by its processor."""
+        row = await self.session.scalar(
+            select(ActionLedgerRecord)
+            .where(
+                ActionLedgerRecord.id == ledger_id,
+                ActionLedgerRecord.status.in_(("pending", "failed")),
+            )
+            .with_for_update(skip_locked=True)
+        )
+        if row is None:
+            return None
+        row.status = "cancelled"
+        row.retryable = False
+        row.available_at = None
+        row.lease_expires_at = None
+        row.error = reason[:1000]
+        await self.session.flush()
+        return self._to_entry(row)
+
+    async def cancel_execution(self, *, execution_id: UUID, reason: str = "workflow execution cancelled") -> int:
+        """Cancel all pending/retryable actions belonging to an execution."""
+        rows = list(
+            (
+                await self.session.scalars(
+                    select(ActionLedgerRecord)
+                    .where(
+                        ActionLedgerRecord.execution_id == execution_id,
+                        ActionLedgerRecord.status.in_(("pending", "failed")),
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            ).all()
+        )
+        for row in rows:
+            row.status = "cancelled"
+            row.retryable = False
+            row.available_at = None
+            row.lease_expires_at = None
+            row.error = reason[:1000]
+        if rows:
+            await self.session.flush()
+        return len(rows)
+
+    async def replay(self, *, ledger_id: UUID) -> ActionLedgerEntry | None:
+        """Explicitly requeue a dead-lettered action without resetting its attempt history."""
+        row = await self.session.scalar(
+            select(ActionLedgerRecord)
+            .where(ActionLedgerRecord.id == ledger_id, ActionLedgerRecord.status == "dead_letter")
+            .with_for_update(skip_locked=True)
+        )
+        if row is None:
+            return None
+        row.status = "pending"
+        row.retryable = False
+        row.available_at = None
+        row.lease_expires_at = None
+        row.error = None
         row.completed_at = None
         await self.session.flush()
         return self._to_entry(row)
