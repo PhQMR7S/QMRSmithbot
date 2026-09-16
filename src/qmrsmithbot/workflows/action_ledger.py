@@ -25,6 +25,7 @@ class ActionLedgerEntry:
     attempt: int
     result_metadata: dict
     error: str | None
+    completed_at: datetime | None
 
 
 class ActionLedgerService:
@@ -60,8 +61,7 @@ class ActionLedgerService:
         )
         await self.session.execute(statement)
         row = await self.session.scalar(
-            select(ActionLedgerRecord)
-            .where(
+            select(ActionLedgerRecord).where(
                 ActionLedgerRecord.execution_id == execution_id,
                 ActionLedgerRecord.node_id == node_id,
                 ActionLedgerRecord.idempotency_key == idempotency_key,
@@ -86,6 +86,7 @@ class ActionLedgerService:
         row.status = "running"
         row.started_at = now
         row.error = None
+        row.completed_at = None
         await self.session.flush()
         return self._to_entry(row)
 
@@ -101,7 +102,7 @@ class ActionLedgerService:
             raise RuntimeError("action ledger entry is not running")
         row.status = "completed"
         row.attempt = result.attempt
-        row.result_metadata = result.metadata
+        row.result_metadata = dict(result.metadata)
         row.completed_at = datetime.now(UTC)
         row.error = None
         await self.session.flush()
@@ -119,11 +120,13 @@ class ActionLedgerService:
         )
         if row is None:
             raise RuntimeError("action ledger entry not found")
+        if row.status != "running":
+            raise RuntimeError("action ledger entry is not running")
         row.status = "failed"
         row.error = error[:1000]
         if retryable:
             row.attempt += 1
-        row.completed_at = datetime.now(UTC)
+        row.completed_at = None
         await self.session.flush()
         return self._to_entry(row)
 
@@ -139,6 +142,7 @@ class ActionLedgerService:
             idempotency_key=row.idempotency_key,
             status=row.status,
             attempt=row.attempt,
-            result_metadata=row.result_metadata,
+            result_metadata=dict(row.result_metadata),
             error=row.error,
+            completed_at=row.completed_at,
         )
