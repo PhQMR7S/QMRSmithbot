@@ -19,7 +19,7 @@ class RetrySchedule:
 
 
 class ActionRetryScheduler:
-    """Persist and evaluate retry availability for failed actions."""
+    """Persist and claim retryable action attempts using durable timestamps."""
 
     def __init__(
         self,
@@ -37,18 +37,26 @@ class ActionRetryScheduler:
         self.max_delay_seconds = max_delay_seconds
 
     def delay_for_attempt(self, attempt: int) -> float:
+        """Return the capped delay assigned to a future attempt number."""
         if attempt < 1:
             raise ValueError("attempt must be positive")
         return min(self.base_delay_seconds * (2 ** (attempt - 1)), self.max_delay_seconds)
 
     async def schedule(self, *, ledger_id: UUID) -> RetrySchedule | None:
+        """Schedule one retryable failed ledger record for a future attempt."""
         row = await self.session.scalar(
             select(ActionLedgerRecord)
-            .where(ActionLedgerRecord.id == ledger_id)
-            .with_for_update()
+            .where(
+                ActionLedgerRecord.id == ledger_id,
+                ActionLedgerRecord.status == "failed",
+                ActionLedgerRecord.retryable.is_(True),
+                ActionLedgerRecord.available_at.is_(None),
+            )
+            .with_for_update(skip_locked=True)
         )
-        if row is None or row.status != "failed":
+        if row is None:
             return None
+
         delay_seconds = self.delay_for_attempt(row.attempt)
         available_at = datetime.now(UTC) + timedelta(seconds=delay_seconds)
         row.available_at = available_at
@@ -68,12 +76,14 @@ class ActionRetryScheduler:
         ledger_id: UUID,
         now: datetime | None = None,
     ) -> ActionLedgerRecord | None:
+        """Atomically claim a retry whose durable availability time has arrived."""
         current_time = now or datetime.now(UTC)
         row = await self.session.scalar(
             select(ActionLedgerRecord)
             .where(
                 ActionLedgerRecord.id == ledger_id,
                 ActionLedgerRecord.status == "failed",
+                ActionLedgerRecord.retryable.is_(True),
                 ActionLedgerRecord.available_at.is_not(None),
                 ActionLedgerRecord.available_at <= current_time,
             )
