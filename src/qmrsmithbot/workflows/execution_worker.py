@@ -6,7 +6,10 @@ from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from qmrsmithbot.workflows.execution_store import WorkflowExecutionSnapshot, WorkflowExecutionStore
+from qmrsmithbot.workflows.execution_store import (
+    WorkflowExecutionSnapshot,
+    WorkflowExecutionStore,
+)
 
 
 WorkflowExecutionProcessor = Callable[[WorkflowExecutionSnapshot], Awaitable[None]]
