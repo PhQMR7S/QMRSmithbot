@@ -33,6 +33,8 @@ class ActionRetryWorker:
             raise ValueError("batch_size must be positive")
         if poll_interval_seconds <= 0:
             raise ValueError("poll interval must be positive")
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds must be positive")
         self.session_factory = session_factory
         self.processor = processor
         self.batch_size = batch_size
