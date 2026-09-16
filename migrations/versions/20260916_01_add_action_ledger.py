@@ -1,7 +1,7 @@
 """Add durable action ledger.
 
 Revision ID: 20260916_01
-Revises: 20260915_01
+Revises: 0007_telegram_runtime_worker_leases
 Create Date: 2026-09-16
 """
 from collections.abc import Sequence
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = "20260916_01"
-down_revision: str | None = "20260915_01"
+down_revision: str | None = "0007_telegram_runtime_worker_leases"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -26,9 +26,9 @@ def upgrade() -> None:
         sa.Column("node_id", sa.String(length=100), nullable=False),
         sa.Column("action_type", sa.String(length=120), nullable=False),
         sa.Column("idempotency_key", sa.String(length=255), nullable=False),
-        sa.Column("status", sa.String(length=16), nullable=False),
-        sa.Column("attempt", sa.Integer(), nullable=False),
-        sa.Column("result_metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("status", sa.String(length=16), nullable=False, server_default="pending"),
+        sa.Column("attempt", sa.Integer(), nullable=False, server_default="1"),
+        sa.Column("result_metadata", postgresql.JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")),
         sa.Column("error", sa.Text(), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
