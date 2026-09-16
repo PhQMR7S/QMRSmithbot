@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import ClassVar, Self
 from uuid import uuid4
 
 import pytest
@@ -17,7 +18,7 @@ class FakeSession:
     async def commit(self) -> None:
         self.committed = True
 
-    async def __aenter__(self) -> "FakeSession":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -25,9 +26,9 @@ class FakeSession:
 
 
 class FakeLedger:
-    recovered: list[ActionLedgerEntry] = []
-    claimed: list[ActionLedgerEntry] = []
-    calls: list[tuple[str, object]] = []
+    recovered: ClassVar[list[ActionLedgerEntry]] = []
+    claimed: ClassVar[list[ActionLedgerEntry]] = []
+    calls: ClassVar[list[tuple[str, object]]] = []
 
     def __init__(self, session, *, lease_seconds: float) -> None:
         self.calls.append(("ledger_init", lease_seconds))
@@ -42,7 +43,7 @@ class FakeLedger:
 
 
 class FakeScheduler:
-    calls: list[object] = []
+    calls: ClassVar[list[object]] = []
 
     def __init__(self, session, **kwargs) -> None:
         self.calls.append(("init", kwargs))
