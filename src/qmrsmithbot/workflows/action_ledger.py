@@ -23,6 +23,7 @@ class ActionLedgerEntry:
     idempotency_key: str
     status: str
     attempt: int
+    retryable: bool
     result_metadata: dict
     error: str | None
     completed_at: datetime | None
@@ -55,6 +56,7 @@ class ActionLedgerService:
                 idempotency_key=idempotency_key,
                 status="pending",
                 attempt=1,
+                retryable=False,
                 result_metadata={},
             )
             .on_conflict_do_nothing(constraint="uq_action_ledger_execution_node_key")
@@ -78,6 +80,17 @@ class ActionLedgerService:
             .where(
                 ActionLedgerRecord.id == ledger_id,
                 ActionLedgerRecord.status.in_(("pending", "failed")),
+                (
+                    (ActionLedgerRecord.status == "pending")
+                    | (
+                        (ActionLedgerRecord.status == "failed")
+                        & ActionLedgerRecord.retryable
+                        & (
+                            ActionLedgerRecord.available_at.is_(None)
+                            | (ActionLedgerRecord.available_at <= now)
+                        )
+                    )
+                ),
             )
             .with_for_update(skip_locked=True)
         )
@@ -85,8 +98,8 @@ class ActionLedgerService:
             return None
         row.status = "running"
         row.started_at = now
+        row.available_at = None
         row.error = None
-        row.completed_at = None
         await self.session.flush()
         return self._to_entry(row)
 
@@ -102,9 +115,11 @@ class ActionLedgerService:
             raise RuntimeError("action ledger entry is not running")
         row.status = "completed"
         row.attempt = result.attempt
+        row.retryable = False
         row.result_metadata = dict(result.metadata)
         row.completed_at = datetime.now(UTC)
         row.error = None
+        row.available_at = None
         await self.session.flush()
         return self._to_entry(row)
 
@@ -124,6 +139,8 @@ class ActionLedgerService:
             raise RuntimeError("action ledger entry is not running")
         row.status = "failed"
         row.error = error[:1000]
+        row.retryable = retryable
+        row.available_at = None
         if retryable:
             row.attempt += 1
         row.completed_at = None
@@ -142,6 +159,7 @@ class ActionLedgerService:
             idempotency_key=row.idempotency_key,
             status=row.status,
             attempt=row.attempt,
+            retryable=row.retryable,
             result_metadata=dict(row.result_metadata),
             error=row.error,
             completed_at=row.completed_at,
