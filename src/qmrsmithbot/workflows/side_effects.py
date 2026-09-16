@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import urlsplit
@@ -55,12 +54,7 @@ class SideEffectLimits:
 class TelegramActionHandler(ActionHandler):
     action_type: str
 
-    def __init__(
-        self,
-        session: AsyncSession,
-        *,
-        limits: SideEffectLimits | None = None,
-    ) -> None:
+    def __init__(self, session: AsyncSession, *, limits: SideEffectLimits | None = None) -> None:
         self.client_factory = TelegramBotClientFactory(session)
         self.limits = limits or SideEffectLimits()
 
@@ -135,11 +129,7 @@ class SendMessageActionHandler(TelegramActionHandler):
     action_type = "action.message"
 
     async def execute(
-        self,
-        *,
-        node: WorkflowNode,
-        context: ExecutionContext,
-        attempt: int,
+        self, *, node: WorkflowNode, context: ExecutionContext, attempt: int
     ) -> ActionResult:
         config = node.config
         chat_id = self._chat_id(context, config)
@@ -162,11 +152,7 @@ class EditMessageActionHandler(TelegramActionHandler):
     action_type = "action.edit_message"
 
     async def execute(
-        self,
-        *,
-        node: WorkflowNode,
-        context: ExecutionContext,
-        attempt: int,
+        self, *, node: WorkflowNode, context: ExecutionContext, attempt: int
     ) -> ActionResult:
         config = node.config
         chat_id = self._chat_id(context, config)
@@ -194,11 +180,7 @@ class DeleteMessageActionHandler(TelegramActionHandler):
     action_type = "action.delete_message"
 
     async def execute(
-        self,
-        *,
-        node: WorkflowNode,
-        context: ExecutionContext,
-        attempt: int,
+        self, *, node: WorkflowNode, context: ExecutionContext, attempt: int
     ) -> ActionResult:
         config = node.config
         chat_id = self._chat_id(context, config)
@@ -220,12 +202,7 @@ class DeleteMessageActionHandler(TelegramActionHandler):
 class HttpActionHandler(ActionHandler):
     action_type = "action.http"
 
-    def __init__(
-        self,
-        transport: HttpTransport,
-        *,
-        limits: SideEffectLimits | None = None,
-    ) -> None:
+    def __init__(self, transport: HttpTransport, *, limits: SideEffectLimits | None = None) -> None:
         self.transport = transport
         self.limits = limits or SideEffectLimits()
 
@@ -286,11 +263,7 @@ class HttpActionHandler(ActionHandler):
         return body
 
     async def execute(
-        self,
-        *,
-        node: WorkflowNode,
-        context: ExecutionContext,
-        attempt: int,
+        self, *, node: WorkflowNode, context: ExecutionContext, attempt: int
     ) -> ActionResult:
         config = node.config
         raw_url = config.get("url")
