@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from typing import Self
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
-from qmrsmithbot.workflows.execution_worker import WorkflowResumeWorker
 from qmrsmithbot.workflows.execution_store import WorkflowExecutionSnapshot
+from qmrsmithbot.workflows.execution_worker import WorkflowResumeWorker
 
 
 def make_snapshot() -> WorkflowExecutionSnapshot:
@@ -36,7 +37,7 @@ def make_snapshot() -> WorkflowExecutionSnapshot:
 
 
 class FakeSession:
-    async def __aenter__(self) -> FakeSession:
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *args: object) -> None:
