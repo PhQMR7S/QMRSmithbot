@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from qmrsmithbot.db.workflow_runtime_models import ActionLedgerRecord
 from qmrsmithbot.workflows.actions import ActionResult
@@ -80,9 +81,11 @@ class ActionLedgerService:
 
     async def claim(self, *, ledger_id: UUID) -> ActionLedgerEntry | None:
         now = datetime.now(UTC)
-        predecessor_completed = ~select(ActionLedgerRecord.id).where(
-            ActionLedgerRecord.execution_id == ActionLedgerRecord.execution_id,
-            ActionLedgerRecord.sequence < ActionLedgerRecord.sequence,
+        predecessor = aliased(ActionLedgerRecord)
+        predecessor_completed = ~select(predecessor.id).where(
+            predecessor.execution_id == ActionLedgerRecord.execution_id,
+            predecessor.sequence < ActionLedgerRecord.sequence,
+            predecessor.status != "completed",
         ).exists()
         row = await self.session.scalar(
             select(ActionLedgerRecord)
