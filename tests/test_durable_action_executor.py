@@ -22,7 +22,12 @@ from qmrsmithbot.workflows.executor import ExecutionContext, ExecutionIdentity, 
 from qmrsmithbot.workflows.schema import WorkflowDefinition
 
 
-def make_entry(*, status: str = "pending", retryable: bool = False) -> ActionLedgerEntry:
+def make_entry(
+    *,
+    status: str = "pending",
+    retryable: bool = False,
+    result_metadata: dict | None = None,
+) -> ActionLedgerEntry:
     return ActionLedgerEntry(
         id=uuid4(),
         execution_id=uuid4(),
@@ -35,7 +40,7 @@ def make_entry(*, status: str = "pending", retryable: bool = False) -> ActionLed
         status=status,
         attempt=1,
         retryable=retryable,
-        result_metadata={},
+        result_metadata=result_metadata or {},
         error=None,
         completed_at=None,
         lease_expires_at=(
@@ -92,8 +97,10 @@ async def test_durable_executor_claims_executes_and_completes() -> None:
 async def test_completed_ledger_entry_is_returned_without_reexecution() -> None:
     ledger = AsyncMock()
     engine = AsyncMock(spec=ActionEngine)
-    entry = make_entry(status="completed")
-    entry.result_metadata = {"external_key": "telegram:message:9", "message_id": 9}
+    entry = make_entry(
+        status="completed",
+        result_metadata={"external_key": "telegram:message:9", "message_id": 9},
+    )
     ledger.get_or_create.return_value = entry
 
     durable = DurableActionExecutor(object(), engine, execution_id=entry.execution_id)
