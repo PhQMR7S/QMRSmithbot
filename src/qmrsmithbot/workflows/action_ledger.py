@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -29,13 +29,17 @@ class ActionLedgerEntry:
     result_metadata: dict
     error: str | None
     completed_at: datetime | None
+    lease_expires_at: datetime | None
 
 
 class ActionLedgerService:
-    """Durable action state, idempotency, retry state, and execution ordering."""
+    """Durable action state, idempotency, retry state, ordering, and leases."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, lease_seconds: float = 60.0) -> None:
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds must be positive")
         self.session = session
+        self.lease_seconds = lease_seconds
 
     async def get_or_create(
         self,
@@ -81,6 +85,7 @@ class ActionLedgerService:
 
     async def claim(self, *, ledger_id: UUID) -> ActionLedgerEntry | None:
         now = datetime.now(UTC)
+        lease_expires_at = now + timedelta(seconds=self.lease_seconds)
         predecessor = aliased(ActionLedgerRecord)
         predecessor_completed = ~select(predecessor.id).where(
             predecessor.execution_id == ActionLedgerRecord.execution_id,
@@ -112,9 +117,45 @@ class ActionLedgerService:
         row.status = "running"
         row.started_at = now
         row.available_at = None
+        row.lease_expires_at = lease_expires_at
         row.error = None
         await self.session.flush()
         return self._to_entry(row)
+
+    async def renew_lease(self, *, ledger_id: UUID) -> ActionLedgerEntry | None:
+        now = datetime.now(UTC)
+        row = await self.session.scalar(
+            select(ActionLedgerRecord).where(
+                ActionLedgerRecord.id == ledger_id,
+                ActionLedgerRecord.status == "running",
+            ).with_for_update(skip_locked=True)
+        )
+        if row is None:
+            return None
+        row.lease_expires_at = now + timedelta(seconds=self.lease_seconds)
+        await self.session.flush()
+        return self._to_entry(row)
+
+    async def recover_expired_leases(self, *, now: datetime | None = None) -> int:
+        current_time = now or datetime.now(UTC)
+        result = await self.session.execute(
+            update(ActionLedgerRecord)
+            .where(
+                ActionLedgerRecord.status == "running",
+                ActionLedgerRecord.lease_expires_at.is_not(None),
+                ActionLedgerRecord.lease_expires_at <= current_time,
+            )
+            .values(
+                status="failed",
+                retryable=True,
+                available_at=None,
+                lease_expires_at=None,
+                started_at=None,
+                completed_at=None,
+                error="action execution lease expired",
+            )
+        )
+        return result.rowcount
 
     async def complete(self, *, ledger_id: UUID, result: ActionResult) -> ActionLedgerEntry:
         row = await self.session.scalar(
@@ -133,6 +174,7 @@ class ActionLedgerService:
         row.completed_at = datetime.now(UTC)
         row.error = None
         row.available_at = None
+        row.lease_expires_at = None
         await self.session.flush()
         return self._to_entry(row)
 
@@ -154,6 +196,7 @@ class ActionLedgerService:
         row.error = error[:1000]
         row.retryable = retryable
         row.available_at = None
+        row.lease_expires_at = None
         if retryable:
             row.attempt += 1
         row.completed_at = None
@@ -177,4 +220,5 @@ class ActionLedgerService:
             result_metadata=dict(row.result_metadata),
             error=row.error,
             completed_at=row.completed_at,
+            lease_expires_at=row.lease_expires_at,
         )
