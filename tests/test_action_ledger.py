@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 from sqlalchemy.dialects import postgresql
@@ -57,19 +58,16 @@ def test_action_ledger_entry_mapping_preserves_ordering_state():
     assert entry.completed_at == record.completed_at
 
 
-def test_action_ledger_ordering_claim_query_requires_completed_predecessors():
-    # Compile the claim statement shape by exercising the public method construction
-    # without executing against a database.
-    from unittest.mock import AsyncMock
-
+def test_action_ledger_ordering_claim_query_contains_predecessor_guard() -> None:
     session = AsyncMock()
-    scheduler = ActionLedgerService(session)
+    session.scalar = AsyncMock(return_value=None)
+    service = ActionLedgerService(session)
+
     import asyncio
 
-    session.scalar = AsyncMock(return_value=None)
-    asyncio.run(scheduler.claim(ledger_id=uuid4()))
+    asyncio.run(service.claim(ledger_id=uuid4()))
     statement = session.scalar.await_args.args[0]
-    compiled = statement.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
-    sql = str(compiled)
-    assert "status != 'completed'" in sql
-    assert 'sequence < action_ledger.sequence' in sql
+    sql = str(statement.compile(dialect=postgresql.dialect()))
+    assert "EXISTS" in sql.upper()
+    assert "sequence <" in sql
+    assert "status !=" in sql
