@@ -8,8 +8,16 @@ from uuid import uuid4
 import pytest
 
 from qmrsmithbot.workflows.action_ledger import ActionLedgerEntry
-from qmrsmithbot.workflows.actions import ActionEngine, ActionExecutionError, ActionFailureKind, ActionResult
-from qmrsmithbot.workflows.durable_action_executor import ActionExecutionDeferred, DurableActionExecutor
+from qmrsmithbot.workflows.actions import (
+    ActionEngine,
+    ActionExecutionError,
+    ActionFailureKind,
+    ActionResult,
+)
+from qmrsmithbot.workflows.durable_action_executor import (
+    ActionExecutionDeferred,
+    DurableActionExecutor,
+)
 from qmrsmithbot.workflows.executor import ExecutionContext, ExecutionIdentity, WorkflowExecutor
 from qmrsmithbot.workflows.schema import WorkflowDefinition
 
@@ -30,7 +38,9 @@ def make_entry(*, status: str = "pending", retryable: bool = False) -> ActionLed
         result_metadata={},
         error=None,
         completed_at=None,
-        lease_expires_at=(datetime.now(UTC) + timedelta(minutes=1)) if status == "running" else None,
+        lease_expires_at=(
+            datetime.now(UTC) + timedelta(minutes=1) if status == "running" else None
+        ),
     )
 
 
