@@ -46,6 +46,8 @@ class WorkflowExecutionRecord(Base):
     pending_nodes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     context_values: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     checkpoint_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    worker_id: Mapped[str | None] = mapped_column(String(128), index=True)
     error: Mapped[str | None] = mapped_column(Text)
     trace_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
