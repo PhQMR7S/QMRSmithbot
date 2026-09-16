@@ -13,6 +13,13 @@ def test_action_ledger_table_constraints():
     assert "ck_action_ledger_status" in constraints
 
 
+def test_action_ledger_schema_includes_retry_state():
+    columns = ActionLedgerRecord.__table__.c
+    assert columns.retryable.nullable is False
+    assert columns.retryable.default is not None
+    assert columns.available_at.nullable is True
+
+
 def test_action_ledger_entry_mapping_preserves_state():
     execution_id = uuid4()
     tenant_id = uuid4()
@@ -26,8 +33,10 @@ def test_action_ledger_entry_mapping_preserves_state():
         idempotency_key="key-1",
         status="completed",
         attempt=2,
+        retryable=False,
         result_metadata={"message_id": 42},
     )
+    record.id = uuid4()
     entry = ActionLedgerService._to_entry(record)
     assert entry.id == record.id
     assert entry.execution_id == execution_id
@@ -36,6 +45,7 @@ def test_action_ledger_entry_mapping_preserves_state():
     assert entry.idempotency_key == "key-1"
     assert entry.status == "completed"
     assert entry.attempt == 2
+    assert entry.retryable is False
     assert entry.result_metadata == {"message_id": 42}
     assert entry.completed_at == record.completed_at
 
@@ -49,8 +59,10 @@ def test_action_ledger_entry_mapping_copies_metadata():
         node_id="send",
         action_type="action.message",
         idempotency_key="key-2",
+        retryable=False,
         result_metadata=metadata,
     )
+    record.id = uuid4()
     entry = ActionLedgerService._to_entry(record)
     entry.result_metadata["message_id"] = 99
     assert record.result_metadata == metadata
