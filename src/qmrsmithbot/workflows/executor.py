@@ -82,6 +82,18 @@ class DispatchPlanLike(Protocol):
 Handler = Callable[[WorkflowNode, ExecutionContext], Awaitable[None]]
 
 
+class DurableActionRunner(Protocol):
+    """Durable action boundary used by the workflow executor."""
+
+    async def execute(
+        self,
+        *,
+        node: WorkflowNode,
+        context: ExecutionContext,
+        sequence: int,
+    ) -> Any: ...
+
+
 class WorkflowExecutionError(RuntimeError):
     """Raised when a workflow cannot be executed safely."""
 
@@ -91,7 +103,7 @@ class WorkflowLimitExceeded(WorkflowExecutionError):
 
 
 class WorkflowExecutor:
-    """Bounded deterministic graph executor; side effects live behind handlers."""
+    """Bounded deterministic graph executor with optional durable action execution."""
 
     def __init__(
         self,
@@ -102,6 +114,7 @@ class WorkflowExecutor:
         max_value_bytes: int = 64 * 1024,
         handler_timeout_seconds: float | None = None,
         execution_timeout_seconds: float | None = None,
+        durable_action_runner: DurableActionRunner | None = None,
     ) -> None:
         if max_steps < 1:
             raise ValueError("max_steps must be positive")
@@ -119,6 +132,7 @@ class WorkflowExecutor:
         self.max_value_bytes = max_value_bytes
         self.handler_timeout_seconds = handler_timeout_seconds
         self.execution_timeout_seconds = execution_timeout_seconds
+        self.durable_action_runner = durable_action_runner
 
     async def run(
         self,
@@ -135,6 +149,7 @@ class WorkflowExecutor:
             outgoing.setdefault(edge.source, []).append((edge.target, edge.condition))
 
         queue = list(matched)
+        action_sequence = sum(1 for node_id in execution.visited if nodes.get(node_id) and nodes[node_id].type.startswith("action."))
         while queue:
             self._check_execution_budget(execution)
             node_id = queue.pop(0)
@@ -147,11 +162,22 @@ class WorkflowExecutor:
             if execution.steps > self.max_steps:
                 raise WorkflowLimitExceeded("workflow execution step limit exceeded")
 
-            handler = self.handlers.get(node.type)
-            if handler is None and not node.type.startswith("trigger."):
-                raise WorkflowExecutionError(f"no handler registered for node type: {node.type}")
-            if handler is not None:
-                await self._run_handler(handler, node, execution)
+            if node.type.startswith("action.") and self.durable_action_runner is not None:
+                action_sequence += 1
+                durable_result = await self.durable_action_runner.execute(
+                    node=node,
+                    context=execution,
+                    sequence=action_sequence,
+                )
+                result = getattr(durable_result, "result", None)
+                if result is not None:
+                    execution.values.update(result.metadata)
+            else:
+                handler = self.handlers.get(node.type)
+                if handler is None and not node.type.startswith("trigger."):
+                    raise WorkflowExecutionError(f"no handler registered for node type: {node.type}")
+                if handler is not None:
+                    await self._run_handler(handler, node, execution)
             self._check_value_budget(execution.values)
             execution.visited.append(node_id)
 
