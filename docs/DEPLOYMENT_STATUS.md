@@ -70,3 +70,22 @@ Advanced inbox/action queue consumers, HTTP/delayed/branching workflows, advance
 full platform admin and linking pre-existing OIDC accounts remain incomplete. The advanced
 consumer activation gate stays disabled. No real child token was available for a Telegram
 end-to-end chat; connect one through its factory panel to perform that final validation.
+
+
+## Native experience redesign
+
+Application revision ce656c6262cd027f07adf31469cd9cd0f0d92162 adds in-place callback
+navigation, native button styles, cards/compact library layouts, name search, status filters,
+saved appearance settings, guided trigger/response creation, individual reply CRUD with
+stale-version rejection, and a visitor response simulator. Opt-in RTL rich messages are
+available, with /plain recovery and /appearance shortcuts. The public ingress accepts the
+corresponding sendMessage/editMessageText/sendRichMessage responses; protection is unchanged.
+
+Validation: 256 local tests passed, and CI run 39031494772 passed all four jobs including ten
+real PostgreSQL scenarios and desktop/mobile browser checks. Live /ready returned 200;
+ingress rejected an unauthenticated update with 401 and forwarded an authenticated ignored
+update with 204. These HTTP checks do not establish actual Telegram rendering of rich
+messages. See NATIVE_FACTORY_EXPERIENCE.md for precise scope.
+
+This is a native chat redesign. A fully designed Mini App and universal support for every
+Telegram feature are not implemented. Child-bot real Telegram delivery remains unverified.
