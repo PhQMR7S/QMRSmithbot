@@ -4,6 +4,10 @@ from uuid import uuid4
 
 import pytest
 
+from qmrsmithbot.telegram.execution import (
+    NonRetryableTelegramUpdateError,
+    RetryableTelegramUpdateError,
+)
 from qmrsmithbot.telegram.queue import ClaimedTelegramUpdate
 from qmrsmithbot.telegram.worker import TelegramRuntimeWorker
 
@@ -34,12 +38,14 @@ class FakeQueue:
 
 
 class ExplodingBoundary:
+    def __init__(self, error):
+        self.error = error
+
     async def execute(self, item, handler):
-        raise RuntimeError("secret user-provided payload")
+        raise self.error
 
 
-@pytest.mark.asyncio
-async def test_unexpected_handler_error_is_retried_without_leaking_payload(monkeypatch):
+@pytest.mark.parametrize(\n    ("error", "expected_message", "terminal"),\n    [\n        (RuntimeError("secret user-provided payload"), "unexpected handler error: RuntimeError", False),\n        (RetryableTelegramUpdateError("secret token"), "retryable handler error: RetryableTelegramUpdateError", False),\n        (NonRetryableTelegramUpdateError("secret token"), "non-retryable handler error: NonRetryableTelegramUpdateError", True),\n    ],\n)\n@pytest.mark.asyncio\nasync def test_handler_errors_do_not_leak_payload(monkeypatch, error, expected_message, terminal):
     from qmrsmithbot.telegram import worker as module
 
     FakeQueue.failures = []
@@ -55,13 +61,13 @@ async def test_unexpected_handler_error_is_retried_without_leaking_payload(monke
     monkeypatch.setattr(module, "SessionFactory", FakeSession)
     monkeypatch.setattr(module, "TelegramUpdateQueue", FakeQueue)
     worker = TelegramRuntimeWorker(handler=None)
-    worker.execution = ExplodingBoundary()
+    worker.execution = ExplodingBoundary(error)
 
     assert await worker.run_once() is True
     assert len(FakeQueue.failures) == 1
     failure = FakeQueue.failures[0]
     assert failure["update_id"] == FakeQueue.item.id
     assert failure["claim_token"] == FakeQueue.item.claim_token
-    assert failure["retry_delay_seconds"] >= 1
-    assert failure["error"] == "unexpected handler error: RuntimeError"
+    assert failure["retry_delay_seconds"] >= (0 if terminal else 1)\n    assert failure.get("terminal", False) is terminal
+    assert failure["error"] == expected_message
     assert "secret" not in failure["error"]
