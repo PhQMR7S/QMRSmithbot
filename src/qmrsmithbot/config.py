@@ -50,6 +50,13 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_environment(self) -> "Settings":
+        if self.telegram_inline_runtime_enabled:
+            ingress = urlparse(self.telegram_ingress_base_url)
+            if (not self.telegram_factory_enabled or ingress.scheme != 'https' or not ingress.hostname
+                    or ingress.path not in ('', '/') or ingress.query or ingress.fragment
+                    or ingress.username or ingress.password
+                    or not self.telegram_credential_encryption_key.get_secret_value()):
+                raise ValueError('Text runtime requires factory credentials and an HTTPS ingress origin')
         if self.auth_telegram_enabled:
             import re
             if not self.telegram_factory_enabled:

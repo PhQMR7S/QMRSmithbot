@@ -119,6 +119,7 @@ class TelegramBotProvisioningService:
         if project is None:
             raise TelegramBotNotFound("project was not found")
 
+        await self._require_no_inline_runtime(project_id)
         assigned = await self.session.scalar(
             select(BotProjectRecord).where(
                 BotProjectRecord.telegram_bot_id == me.id,

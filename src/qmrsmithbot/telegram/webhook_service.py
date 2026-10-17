@@ -130,6 +130,9 @@ class TelegramWebhookService:
         )
         if project is None:
             raise TelegramWebhookNotReady("project was not found")
+        inline = await self.session.get(TelegramInlineBotRecord, project_id)
+        if inline is not None and inline.enabled:
+            raise TelegramWebhookNotReady('Manage this bot through its factory panel')
         state = await self.session.scalar(
             select(TelegramWebhookStateRecord)
             .where(TelegramWebhookStateRecord.project_id == project_id)

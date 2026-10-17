@@ -103,7 +103,7 @@ class BotManagement:
             raise InlineBotError('unavailable')
         base = settings.telegram_ingress_base_url.rstrip('/')
         parsed = urlsplit(base)
-        if parsed.scheme != 'https' or not parsed.hostname or parsed.query or parsed.fragment or parsed.path:
+        if parsed.scheme != 'https' or not parsed.hostname or parsed.query or parsed.fragment or parsed.path or parsed.username or parsed.password:
             raise InlineBotError('unavailable')
         async with self.session.begin_nested():
             project = await self.project(project_id, Permission.PROJECT_PUBLISH, lock=True)

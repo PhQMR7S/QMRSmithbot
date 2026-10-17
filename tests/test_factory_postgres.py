@@ -313,3 +313,28 @@ async def test_text_bot_full_lifecycle(factory_database, monkeypatch):
     assert (await reply(update(text='/start')))['text'] == 'Second greeting'
     async with sessions() as session:
         assert (await session.get(TelegramInlineBotRecord, project_id)).enabled
+
+    # The authenticated HTTP transport serves the same published version.
+    from qmrsmithbot.api.app import app
+    from qmrsmithbot.db.session import get_session
+    from qmrsmithbot.telegram.inline_runtime import child_webhook_secret
+    async def session_override():
+        async with sessions() as session, session.begin():
+            yield session
+    app.dependency_overrides[get_session] = session_override
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='https://test') as client:
+            path = '/api/v1/telegram/inline/' + str(project_id)
+            body = update(text='/start').model_dump(mode='json', exclude_none=True)
+            assert (await client.post(path, json=body)).status_code == 401
+            result = await client.post(path, json=body, headers={
+                'X-Telegram-Bot-Api-Secret-Token': child_webhook_secret(project_id)})
+            assert result.status_code == 200 and result.json()['text'] == 'Second greeting'
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+    # Telegram activation failure must not publish a new draft.
+    await processor.process(update(callback='welcome:' + str(project_id)))
+    await processor.process(update(text='Must remain a draft'))
+    fake.set_webhook.side_effect = TimeoutError()
+    assert 'تعذر' in (await launch())['text']
+    assert (await reply(update(text='/start')))['text'] == 'Second greeting'

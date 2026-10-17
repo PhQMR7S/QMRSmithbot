@@ -43,8 +43,10 @@ Development branch capabilities now include:
 - Opt-in private Telegram factory menus, persistent draft wizard and per-update deduplication.
 - Vercel FastAPI entrypoint preparation.
 
-These are development capabilities, not a deployed production factory. The dashboard requires a configured OIDC provider. The Telegram factory webhook requires PostgreSQL migrations, a factory bot token and a separate webhook secret. It is disabled by default. Factory Telegram identities are distinct from OIDC identities until explicit linking is implemented.
+The private Telegram factory is connected at @Manjerxbot. Factory chat supports encrypted bot-token binding, welcome/reply/command editing, previews, confirmed publication, stop/resume, and scoped statistics. The bounded text runtime returns static Telegram webhook replies without a persistent worker. Enable it only after applying migrations and deploying the authenticated child ingress.
 
-Generated-bot delivery still requires durable queue workers or a serverless queue adaptation. Advanced bot types, full platform administration and infrastructure deployment remain incomplete. There is no fixed project-count cap, but provider and execution limits still apply.
+Advanced workflow actions (HTTP, delays, branching, variables and action chains) still require the separate durable queue runtime. Its activation gate remains disabled. Telegram login is available when configured; existing OIDC identities remain separate until explicit account linking is implemented. There is no fixed project-count cap, but provider and execution limits still apply.
+
+See `docs/INLINE_TEXT_RUNTIME.md` for runtime boundaries, setup and retry semantics.
 
 Read `docs/DASHBOARD.md`, `docs/TEMPLATES.md`, `docs/PROJECT_MANAGEMENT.md`, `docs/TELEGRAM_FACTORY.md` and `docs/VERCEL_DEPLOYMENT.md` for functionality, prerequisites and validation limits.

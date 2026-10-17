@@ -29,6 +29,9 @@ async def readiness(session: Annotated[AsyncSession, Depends(readiness_session)]
             if settings.rate_limit_enabled and settings.rate_limit_backend == 'postgresql':
                 await session.execute(text(
                     'SELECT key, count, expires_at FROM security_rate_limits LIMIT 0'))
+            if settings.telegram_inline_runtime_enabled:
+                await session.execute(text('SELECT project_id FROM telegram_inline_bots LIMIT 0'))
+                await session.execute(text('SELECT project_id, update_id FROM telegram_inline_updates LIMIT 0'))
             applied = await session.execute(text('SELECT version_num FROM alembic_version'))
             if applied.scalar_one_or_none() != '20261017_04':
                 return JSONResponse(status_code=503, content={'status': 'unavailable'},
