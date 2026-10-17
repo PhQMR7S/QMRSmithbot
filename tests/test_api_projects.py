@@ -137,3 +137,53 @@ def test_workflow_lifecycle_endpoints(client: TestClient) -> None:
 def test_missing_session_is_rejected() -> None:
     response = TestClient(app).post("/api/v1/projects", json={"name": "No Auth"})
     assert response.status_code == 401
+
+
+def test_template_catalog_and_draft_creation(client):
+    catalog = client.get('/api/v1/templates?language_code=en')
+    assert catalog.status_code == 200
+    assert len(catalog.json()) == 3
+    response = client.post('/api/v1/templates/auto-replies/projects', json={
+        'name': 'FAQ', 'rules': [{'trigger': 'price', 'response': 'Ask our team'}]})
+    assert response.status_code == 201
+    body = response.json()
+    assert body['owner_id'] == 42
+    assert body['tenant_id'] == str(TENANT_ID)
+    assert body['status'] == 'draft'
+    assert body['active_version'] is None
+    assert body['draft_version']['version'] == 1
+    assert body['draft_version']['published_at'] is None
+
+
+def test_templates_reject_invalid_requests(client):
+    for template, payload, code in [
+        ('missing', {'name': 'A'}, 404),
+        ('welcome', {'name': '   '}, 422),
+        ('auto-replies', {'name': 'A'}, 422),
+        ('command-menu', {'name': 'A', 'rules': [{'trigger': 'start', 'response': 'x'}]}, 422),
+        ('welcome', {'name': 'A', 'owner_id': 9}, 422),
+    ]:
+        assert client.post(f'/api/v1/templates/{template}/projects', json=payload).status_code == code
+
+
+def test_template_authentication_required():
+    c = TestClient(app)
+    assert c.get('/api/v1/templates').status_code == 401
+    assert c.post('/api/v1/templates/welcome/projects', json={'name': 'A'}).status_code == 401
+
+
+def test_template_permission_is_required(client):
+    from qmrsmithbot.auth.authorization import AuthorizationDenied
+
+    class Denied:
+        async def require_permission(self, **kwargs):
+            raise AuthorizationDenied('Permission denied')
+
+    app.dependency_overrides[get_authorization_service] = Denied
+    assert client.post('/api/v1/templates/welcome/projects', json={'name': 'A'}).status_code == 403
+
+
+def test_no_fixed_five_project_limit(client):
+    for index in range(6):
+        response = client.post('/api/v1/templates/welcome/projects', json={'name': f'Bot {index}'})
+        assert response.status_code == 201

@@ -8,6 +8,7 @@ from qmrsmithbot.api.preferences import router as preferences_router
 from qmrsmithbot.api.projects import router as projects_router
 from qmrsmithbot.api.telegram import router as telegram_router
 from qmrsmithbot.api.telegram_webhook import router as telegram_webhook_router
+from qmrsmithbot.api.templates import router as templates_router
 from qmrsmithbot.api.tenants import router as tenants_router
 from qmrsmithbot.auth.authorization import AuthorizationDenied
 from qmrsmithbot.auth.service import (
@@ -46,6 +47,7 @@ app.include_router(auth_router)
 app.include_router(preferences_router)
 app.include_router(projects_router)
 app.include_router(tenants_router)
+app.include_router(templates_router)
 app.include_router(telegram_router)
 app.include_router(telegram_webhook_router)
 
