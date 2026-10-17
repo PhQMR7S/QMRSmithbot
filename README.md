@@ -9,7 +9,7 @@ The platform is designed as a multi-tenant control plane and runtime with:
 - Authentication, identity, sessions, tenant isolation, roles, and permissions
 - Visual workflow definitions and validation
 - Versioned project lifecycle with publish/rollback
-- Telegram bot provisioning and runtime (next phase)
+- Telegram bot provisioning and durable workflow runtime foundations
 - Platform-level access policies
 - Async queues/workers, observability, audit, and security controls
 
@@ -35,4 +35,16 @@ Database migrations must be applied before starting application workers.
 
 ## Current status
 
-The authentication/identity/tenant security foundation is implemented and is being hardened before Telegram runtime work begins.
+Development branch capabilities now include:
+
+- Arabic/English account preferences and a responsive same-origin `/dashboard`.
+- Versioned starter templates for welcome, exact text replies and command responses.
+- Tenant-scoped project search, rename, stop/resume and workflow draft/publish lifecycle.
+- Opt-in private Telegram factory menus, persistent draft wizard and per-update deduplication.
+- Vercel FastAPI entrypoint preparation.
+
+These are development capabilities, not a deployed production factory. The dashboard requires a configured OIDC provider. The Telegram factory webhook requires PostgreSQL migrations, a factory bot token and a separate webhook secret. It is disabled by default. Factory Telegram identities are distinct from OIDC identities until explicit linking is implemented.
+
+Generated-bot delivery still requires durable queue workers or a serverless queue adaptation. Advanced bot types, full platform administration and infrastructure deployment remain incomplete. There is no fixed project-count cap, but provider and execution limits still apply.
+
+Read `docs/DASHBOARD.md`, `docs/TEMPLATES.md`, `docs/PROJECT_MANAGEMENT.md`, `docs/TELEGRAM_FACTORY.md` and `docs/VERCEL_DEPLOYMENT.md` for functionality, prerequisites and validation limits.

@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     telegram_factory_bot_token: SecretStr = SecretStr("")
     telegram_factory_admin_ids: tuple[int, ...] = ()
+    telegram_factory_enabled: bool = False
+    telegram_factory_webhook_secret: SecretStr = SecretStr("")
     telegram_credential_encryption_key: SecretStr = SecretStr("")
     telegram_webhook_base_url: str = ""
     telegram_worker_poll_seconds: float = Field(default=1.0, ge=0.1, le=30.0)
@@ -41,6 +43,16 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_environment(self) -> "Settings":
+        if self.telegram_factory_enabled:
+            import re
+            secret = self.telegram_factory_webhook_secret.get_secret_value()
+            if not self.telegram_factory_bot_token.get_secret_value():
+                raise ValueError("Factory token is required when the factory is enabled")
+            if not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", secret):
+                raise ValueError("Factory webhook secret must contain 32 to 256 URL-safe characters")
+            if not re.fullmatch(r"[0-9]{5,16}:[A-Za-z0-9_-]{30,100}",
+                                self.telegram_factory_bot_token.get_secret_value()):
+                raise ValueError("Factory bot token has an invalid format")
         if any(user_id <= 0 for user_id in self.telegram_factory_admin_ids):
             raise ValueError("TELEGRAM_FACTORY_ADMIN_IDS must contain positive user IDs")
         environment = self.app_env.strip().lower()
