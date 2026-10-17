@@ -9,6 +9,11 @@ from sqlalchemy.exc import OperationalError
 from qmrsmithbot.api.app import app
 
 
+class FakeResult:
+    def scalar_one_or_none(self):
+        return "0007"
+
+
 class FakeSession:
     def __init__(self, fail=False):
         self.fail = fail
@@ -22,6 +27,7 @@ class FakeSession:
     async def execute(self, _statement):
         if self.fail:
             raise OperationalError("SELECT 1", {}, Exception("private connection string"))
+        return FakeResult()
 
 
 @pytest.mark.asyncio
