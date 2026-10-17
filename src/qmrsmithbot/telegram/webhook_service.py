@@ -66,6 +66,11 @@ class TelegramWebhookService:
         if project is None or credential is None or project.telegram_bot_id is None:
             raise TelegramWebhookNotReady("Telegram bot provisioning is required first")
 
+        if not settings.telegram_runtime_consumer_verified:
+            raise TelegramWebhookNotReady(
+                "Generated-bot runtime consumer has not been verified; webhook activation is disabled"
+            )
+
         webhook_url = self._webhook_url(project_id)
         state = await self.session.scalar(
             select(TelegramWebhookStateRecord)
