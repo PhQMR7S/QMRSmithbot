@@ -21,6 +21,7 @@ from qmrsmithbot.db.session import close_database
 from qmrsmithbot.projects.service import (
     InvalidWorkflowError,
     ProjectNotFoundError,
+    ProjectStateError,
     VersionNotFoundError,
 )
 from qmrsmithbot.rate_limit import close_rate_limiter
@@ -131,3 +132,8 @@ async def telegram_webhook_error(_: Request, exc: TelegramWebhookError) -> JSONR
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "QMRSmithbot"}
+
+
+@app.exception_handler(ProjectStateError)
+async def project_state_error(_: Request, exc: ProjectStateError) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc)})

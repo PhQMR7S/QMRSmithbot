@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from qmrsmithbot.api.dependencies import (
     get_authorization_service,
@@ -19,7 +20,7 @@ from qmrsmithbot.api.schemas import (
 )
 from qmrsmithbot.auth.authorization import AuthorizationService
 from qmrsmithbot.auth.models import Permission, Principal
-from qmrsmithbot.domain.models import BotProject, WorkflowVersion
+from qmrsmithbot.domain.models import BotProject, BotStatus, WorkflowVersion
 from qmrsmithbot.projects.service import ProjectService
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
@@ -161,3 +162,82 @@ async def rollback_workflow(
         version=version,
     )
     return project_response(project)
+
+
+class RenameProjectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Name must not be blank")
+        return value.strip()
+
+
+class ProjectPage(BaseModel):
+    items: list[ProjectResponse]
+    limit: int
+    offset: int
+    has_more: bool
+
+
+@router.get("", response_model=ProjectPage)
+async def list_projects(
+    principal: CurrentPrincipal, tenant_id: CurrentTenantId,
+    authorization: AuthorizationDependency, service: ProjectServiceDependency,
+    query: Annotated[str, Query(max_length=120)] = "",
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    project_status: Annotated[BotStatus | None, Query(alias="status")] = None,
+) -> ProjectPage:
+    await authorization.require_permission(
+        user_id=principal.user_id, tenant_id=tenant_id, permission=Permission.PROJECT_READ
+    )
+    projects = await service.list_projects(
+        tenant_id=tenant_id, query=query, limit=limit + 1, offset=offset, status=project_status
+    )
+    return ProjectPage(items=[project_response(p) for p in projects[:limit]],
+                       limit=limit, offset=offset, has_more=len(projects) > limit)
+
+
+@router.patch("/{project_id}", response_model=ProjectResponse)
+async def rename_project(
+    project_id: UUID, payload: RenameProjectRequest, principal: CurrentPrincipal,
+    tenant_id: CurrentTenantId, authorization: AuthorizationDependency,
+    service: ProjectServiceDependency,
+) -> ProjectResponse:
+    await authorization.require_permission(
+        user_id=principal.user_id, tenant_id=tenant_id, permission=Permission.PROJECT_WRITE
+    )
+    return project_response(await service.rename(
+        project_id=project_id, tenant_id=tenant_id, name=payload.name,
+        actor_user_id=principal.user_id,
+    ))
+
+
+@router.post("/{project_id}/stop", response_model=ProjectResponse)
+async def stop_project(
+    project_id: UUID, principal: CurrentPrincipal, tenant_id: CurrentTenantId,
+    authorization: AuthorizationDependency, service: ProjectServiceDependency,
+) -> ProjectResponse:
+    await authorization.require_permission(
+        user_id=principal.user_id, tenant_id=tenant_id, permission=Permission.PROJECT_PUBLISH
+    )
+    return project_response(await service.set_running(
+        project_id=project_id, tenant_id=tenant_id, running=False, actor_user_id=principal.user_id
+    ))
+
+
+@router.post("/{project_id}/resume", response_model=ProjectResponse)
+async def resume_project(
+    project_id: UUID, principal: CurrentPrincipal, tenant_id: CurrentTenantId,
+    authorization: AuthorizationDependency, service: ProjectServiceDependency,
+) -> ProjectResponse:
+    await authorization.require_permission(
+        user_id=principal.user_id, tenant_id=tenant_id, permission=Permission.PROJECT_PUBLISH
+    )
+    return project_response(await service.set_running(
+        project_id=project_id, tenant_id=tenant_id, running=True, actor_user_id=principal.user_id
+    ))

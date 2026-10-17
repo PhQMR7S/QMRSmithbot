@@ -11,6 +11,7 @@ from qmrsmithbot.domain.models import BotProject as Project
 from qmrsmithbot.domain.models import BotStatus, WorkflowVersion
 from qmrsmithbot.projects.service import (
     ProjectNotFoundError,
+    ProjectStateError,
     ProjectStore,
     VersionNotFoundError,
 )
@@ -44,6 +45,50 @@ class SQLAlchemyProjectStore(ProjectStore):
         )
         record = await self.session.scalar(statement)
         return None if record is None else self._project(record)
+
+    async def list_projects(self, *, tenant_id: UUID, query: str, limit: int,
+                            offset: int, status: BotStatus | None) -> list[Project]:
+        statement = select(BotProjectRecord).where(BotProjectRecord.tenant_id == tenant_id)
+        if query:
+            statement = statement.where(BotProjectRecord.name.icontains(query, autoescape=True))
+        if status is not None:
+            statement = statement.where(BotProjectRecord.status == status)
+        records = await self.session.scalars(
+            statement.order_by(BotProjectRecord.id).limit(limit).offset(offset)
+        )
+        return [self._project(record) for record in records]
+
+    async def _locked_project(self, project_id: UUID, tenant_id: UUID) -> BotProjectRecord:
+        record = await self.session.scalar(select(BotProjectRecord).where(
+            BotProjectRecord.id == project_id, BotProjectRecord.tenant_id == tenant_id
+        ).with_for_update())
+        if record is None:
+            raise ProjectNotFoundError("project was not found")
+        return record
+
+    async def rename_project(self, *, project_id: UUID, tenant_id: UUID, name: str) -> Project:
+        record = await self._locked_project(project_id, tenant_id)
+        record.name = name
+        await self.session.flush()
+        return self._project(record)
+
+    async def set_running(self, *, project_id: UUID, tenant_id: UUID, running: bool) -> Project:
+        record = await self._locked_project(project_id, tenant_id)
+        if running:
+            if record.status not in (BotStatus.RUNNING, BotStatus.STOPPED):
+                raise ProjectStateError("Only a published running or stopped project can resume")
+            published = await self.session.scalar(select(WorkflowVersionRecord).where(
+                WorkflowVersionRecord.project_id == record.id,
+                WorkflowVersionRecord.version == record.active_version,
+                WorkflowVersionRecord.published_at.is_not(None),
+            ))
+            if published is None:
+                raise ProjectStateError("Publish a valid workflow before resuming")
+            record.status = BotStatus.RUNNING
+        else:
+            record.status = BotStatus.STOPPED
+        await self.session.flush()
+        return self._project(record)
 
     async def create_next_version(
         self, project_id: UUID, definition: dict, version_id: UUID
