@@ -15,7 +15,7 @@ from qmrsmithbot.templates.catalog import CATALOG, TemplateOptions
 
 @pytest.mark.parametrize('template', CATALOG)
 def test_text_runtime_accepts_all_factory_templates(template):
-    rules = [] if template.mode == 'welcome' else [{'trigger': 'help', 'response': 'Details'}]
+    rules = [] if template.mode in ('welcome', 'buttons', 'contact') else [{'trigger': 'help', 'response': 'Details'}]
     definition = template.build(TemplateOptions(welcome='Hello', rules=rules)).model_dump(mode='json')
     program = compile_text_program(definition)
     assert program.commands['start'] == 'Hello'

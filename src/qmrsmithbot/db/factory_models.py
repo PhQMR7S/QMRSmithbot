@@ -65,3 +65,34 @@ class TelegramInlineUpdateRecord(Base):
     update_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     response: Mapped[dict | None] = mapped_column(JSONB)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class FactoryButtonRecord(Base):
+    __tablename__ = 'factory_buttons'
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    project_id: Mapped[UUID] = mapped_column(ForeignKey('bot_projects.id', ondelete='CASCADE'), index=True)
+    parent_id: Mapped[UUID | None] = mapped_column(ForeignKey('factory_buttons.id', ondelete='CASCADE'), index=True)
+    draft: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    published: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
+    deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class BotOwnerStateRecord(Base):
+    __tablename__ = 'bot_owner_states'
+    project_id: Mapped[UUID] = mapped_column(ForeignKey('bot_projects.id', ondelete='CASCADE'), primary_key=True)
+    data: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class ContactDeliveryRecord(Base):
+    __tablename__ = 'contact_deliveries'
+    project_id: Mapped[UUID] = mapped_column(ForeignKey('bot_projects.id', ondelete='CASCADE'), primary_key=True)
+    owner_message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    visitor_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class ContactBlockRecord(Base):
+    __tablename__ = 'contact_blocks'
+    project_id: Mapped[UUID] = mapped_column(ForeignKey('bot_projects.id', ondelete='CASCADE'), primary_key=True)
+    visitor_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

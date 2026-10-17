@@ -61,3 +61,28 @@ def test_negative_update_id_rejected(client):
     assert c.post('/api/v1/factory/webhook', json={**UPDATE, 'update_id': -1},
                   headers={'X-Telegram-Bot-Api-Secret-Token': SECRET}).status_code == 400
     processor.process.assert_not_awaited()
+
+
+def test_callback_acknowledgement_does_not_serialize_menu_processing(client, monkeypatch):
+    import asyncio
+    c, processor = client
+    started = None
+    async def process(update):
+        nonlocal started
+        if started is None:
+            started = asyncio.Event()
+        started.set()
+        return {'method': 'editMessageText', 'chat_id': 42, 'message_id': 1, 'text': 'Fast panel'}
+    async def acknowledge(callback_id):
+        nonlocal started
+        if started is None:
+            started = asyncio.Event()
+        # Sequential acknowledgement would deadlock here; concurrent processing completes it.
+        await asyncio.wait_for(started.wait(), timeout=1)
+    processor.process.side_effect = process
+    monkeypatch.setattr('qmrsmithbot.api.factory.acknowledge_callback', acknowledge)
+    body = {'update_id': 2, 'callback_query': {'id':'query','from':UPDATE['message']['from'],
+        'chat_instance':'test','message':UPDATE['message'],'data':'home'}}
+    response = c.post('/api/v1/factory/webhook', json=body,
+                      headers={'X-Telegram-Bot-Api-Secret-Token': SECRET})
+    assert response.status_code == 200 and response.json()['text'] == 'Fast panel'

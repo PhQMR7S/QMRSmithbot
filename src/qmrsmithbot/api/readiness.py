@@ -32,8 +32,12 @@ async def readiness(session: Annotated[AsyncSession, Depends(readiness_session)]
             if settings.telegram_inline_runtime_enabled:
                 await session.execute(text('SELECT project_id FROM telegram_inline_bots LIMIT 0'))
                 await session.execute(text('SELECT project_id, update_id FROM telegram_inline_updates LIMIT 0'))
+                await session.execute(text('SELECT project_id, draft, published FROM factory_buttons LIMIT 0'))
+                await session.execute(text('SELECT project_id FROM contact_deliveries LIMIT 0'))
+                await session.execute(text('SELECT project_id FROM contact_blocks LIMIT 0'))
+                await session.execute(text('SELECT project_id FROM bot_owner_states LIMIT 0'))
             applied = await session.execute(text('SELECT version_num FROM alembic_version'))
-            if applied.scalar_one_or_none() != '20261017_04':
+            if applied.scalar_one_or_none() != '20261017_05':
                 return JSONResponse(status_code=503, content={'status': 'unavailable'},
                                     headers={'Cache-Control': 'no-store', 'Retry-After': '5'})
     except (SQLAlchemyError, OSError, TimeoutError):

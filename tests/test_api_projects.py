@@ -158,7 +158,7 @@ def test_missing_session_is_rejected() -> None:
 def test_template_catalog_and_draft_creation(client):
     catalog = client.get('/api/v1/templates?language_code=en')
     assert catalog.status_code == 200
-    assert len(catalog.json()) == 3
+    assert {'buttons', 'contact', 'welcome', 'auto-replies', 'command-menu'} == {item['id'] for item in catalog.json()}
     response = client.post('/api/v1/templates/auto-replies/projects', json={
         'name': 'FAQ', 'rules': [{'trigger': 'price', 'response': 'Ask our team'}]})
     assert response.status_code == 201

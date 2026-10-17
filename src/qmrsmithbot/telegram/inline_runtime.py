@@ -28,11 +28,12 @@ def child_webhook_secret(project_id):
 class TextProgram:
     commands: dict[str, str]
     messages: dict[str, str]
+    kind: str = "text"
 
 
 def compile_text_program(raw):
     definition = WorkflowDefinition.model_validate(raw)
-    if definition.schema_version != 1 or definition.variables:
+    if definition.schema_version != 1 or definition.variables not in ({}, {'factory_kind': 'buttons'}, {'factory_kind': 'contact'}):
         raise InlineBotError('This workflow needs the advanced runtime')
     nodes = {node.id: node for node in definition.nodes}
     commands, messages, used = {}, {}, set()
@@ -62,7 +63,7 @@ def compile_text_program(raw):
         used.update((node.id, target.id))
     if used != set(nodes) or 'start' not in commands:
         raise InlineBotError('A start reply and connected nodes are required')
-    return TextProgram(commands, messages)
+    return TextProgram(commands, messages, definition.variables.get('factory_kind', 'text'))
 
 
 async def process_inline_update(session, project_id, update):
@@ -84,6 +85,12 @@ async def process_inline_update(session, project_id, update):
     if version is None:
         raise InlineBotError('Published workflow is unavailable')
     program = compile_text_program(version.definition)
+    if program.kind in ('buttons', 'contact'):
+        from qmrsmithbot.telegram.product_runtime import product_response
+        response = await product_response(session, project, program, update)
+        session.add(TelegramInlineUpdateRecord(project_id=project_id, update_id=update.update_id, response=response))
+        await session.flush()
+        return response
     message = update.message
     response = None
     if message and message.chat.type == 'private' and message.from_user and not message.from_user.is_bot:

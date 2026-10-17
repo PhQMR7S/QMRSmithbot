@@ -37,13 +37,13 @@ class Template:
     category: str
     title_ar: str
     title_en: str
-    mode: Literal['welcome', 'message', 'command']
+    mode: Literal['welcome', 'message', 'command', 'buttons', 'contact']
     version: int = 1
 
     def build(self, options: TemplateOptions) -> WorkflowDefinition:
-        if self.mode == 'welcome' and options.rules:
+        if self.mode in ('welcome', 'buttons', 'contact') and options.rules:
             raise ValueError('Welcome template does not accept reply rules')
-        if self.mode != 'welcome' and not options.rules:
+        if self.mode in ('message', 'command') and not options.rules:
             raise ValueError('This template requires at least one reply rule')
         nodes = [{'id': 'start', 'type': 'trigger.command', 'config': {'command': 'start'}},
                  {'id': 'welcome', 'type': 'action.message', 'config': {'text': options.welcome or (
@@ -64,10 +64,13 @@ class Template:
                 {'id': f'reply_{index}', 'type': 'action.message', 'config': {'text': rule.response}},
             ])
             edges.append({'source': node_id, 'target': f'reply_{index}'})
-        return WorkflowDefinition.model_validate({'nodes': nodes, 'edges': edges})
+        return WorkflowDefinition.model_validate({'nodes': nodes, 'edges': edges,
+            'variables': {'factory_kind': self.mode} if self.mode in ('buttons', 'contact') else {}})
 
 
 CATALOG = (
+    Template('buttons', 'menus', '🗂 بوت أزرار وملفات', '🗂 Buttons & files bot', 'buttons'),
+    Template('contact', 'communication', '✉️ بوت تواصل', '✉️ Contact bot', 'contact'),
     Template('welcome', 'communication', 'بوت ترحيب', 'Welcome bot', 'welcome'),
     Template('auto-replies', 'communication', 'ردود نصية تلقائية', 'Text auto replies', 'message'),
     Template('command-menu', 'utilities', 'قائمة أوامر', 'Command menu', 'command'),

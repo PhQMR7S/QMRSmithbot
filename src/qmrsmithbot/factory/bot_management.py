@@ -8,13 +8,14 @@ from uuid import UUID, uuid4
 from aiogram import Bot
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.exceptions import TelegramAPIError
-from sqlalchemy import func, select
+from sqlalchemy import case, func, null, select, update
 from sqlalchemy.exc import IntegrityError
 
 from qmrsmithbot.auth.models import Permission
 from qmrsmithbot.config import settings
-from qmrsmithbot.db.factory_models import TelegramInlineBotRecord
+from qmrsmithbot.db.factory_models import FactoryButtonRecord, TelegramInlineBotRecord
 from qmrsmithbot.db.models import BotCredentialRecord, BotProjectRecord, WorkflowVersionRecord
+from qmrsmithbot.factory.button_editor import ButtonEditor
 from qmrsmithbot.factory.menu import MenuState
 from qmrsmithbot.factory.reply_editor import ReplyEditor
 from qmrsmithbot.telegram.inline_runtime import (
@@ -109,7 +110,12 @@ class BotManagement:
         async with self.session.begin_nested():
             project = await self.project(project_id, Permission.PROJECT_PUBLISH, lock=True)
             version = await self.latest(project_id)
-            compile_text_program(version.definition)
+            program = compile_text_program(version.definition)
+            if program.kind == 'buttons':
+                await self.session.execute(update(FactoryButtonRecord).where(FactoryButtonRecord.project_id == project_id).values(
+                    published=case((FactoryButtonRecord.deleted.is_(True), null()),
+                        (((FactoryButtonRecord.draft['kind'].astext == 'file') & FactoryButtonRecord.draft['file_id'].astext.is_(None)), null()),
+                        else_=FactoryButtonRecord.draft)))
             credential = await self.session.get(BotCredentialRecord, project_id)
             if credential is None or project.telegram_bot_id is None:
                 raise InlineBotError('unbound')
@@ -120,7 +126,7 @@ class BotManagement:
             bot = make_bot(decrypt_bot_token(credential.token_ciphertext))
             try:
                 ok = await bot.set_webhook(url=url, secret_token=child_webhook_secret(project_id),
-                    allowed_updates=['message'], max_connections=1, drop_pending_updates=False)
+                    allowed_updates=['message', 'callback_query'], max_connections=1, drop_pending_updates=False)
                 info = await bot.get_webhook_info()
                 if not ok or info.url != url:
                     raise RuntimeError()
@@ -166,6 +172,9 @@ class BotManagement:
             return [button('↩ لوحة البوت', '↩ Bot panel', 'project:' + str(project_id))]
         state = await self.store.state()
         try:
+            buttons = await ButtonEditor(self, menu).handle(text=text, callback=callback)
+            if buttons is not None:
+                return buttons
             edited = await ReplyEditor(self, menu).handle(text=text, callback=callback)
             if edited is not None:
                 return edited
@@ -187,9 +196,10 @@ class BotManagement:
                     '🧭 Create your bot\n\n1. Choose a template and add content.\n2. Open its panel and connect the bot token from @BotFather.\n3. Preview, then Publish & run.\n\nEdit content or stop your bot from its panel. Tokens are encrypted and never displayed.'))
             if callback and ':' in callback:
                 action, raw = callback.split(':', 1)
-                if action in ('project', 'bind', 'preview', 'rename', 'welcome', 'rules', 'rulesmsg', 'rulescmd', 'launchask', 'connection', 'botsettings', 'simulate'):
+                if action in ('project', 'bind', 'preview', 'rename', 'welcome', 'rules', 'rulesmsg', 'rulescmd', 'launchask', 'connection', 'botsettings', 'simulate', 'contactsetup'):
                     project_id = UUID(raw)
                     project = await self.project(project_id)
+                    program = compile_text_program((await self.latest(project_id)).definition)
                     if action == 'project':
                         await self.store.save_state(MenuState('idle', {}))
                         version = await self.latest(project_id)
@@ -197,11 +207,19 @@ class BotManagement:
                         connected = '@' + project.telegram_username if project.telegram_username else tr('غير مربوط', 'Not connected')
                         status = menu.text(project.status)
                         pending = version.version != project.active_version
+                        if program.kind == 'buttons':
+                            pending = pending or bool(await self.session.scalar(select(FactoryButtonRecord.id).where(
+                                FactoryButtonRecord.project_id == project_id,
+                                ((FactoryButtonRecord.deleted.is_(False)) & FactoryButtonRecord.draft.is_distinct_from(FactoryButtonRecord.published)) | ((FactoryButtonRecord.deleted.is_(True)) & FactoryButtonRecord.published.is_not(None))).limit(1)))
                         rows = [[button('📝 استوديو المحتوى', '📝 Content studio', 'content:' + raw)],
                                 [button('👁 معاينة الزائر', '👁 Visitor preview', 'preview:' + raw),
                                  button('🚀 النشر', '🚀 Publish', 'launchask:' + raw)],
                                 [button('🔐 الاتصال والتوكن', '🔐 Connection & token', 'connection:' + raw),
                                  button('⚙️ الإعدادات', '⚙️ Settings', 'botsettings:' + raw)]]
+                        if program.kind == 'buttons':
+                            rows[0] = [button('🗂 مصمم الأزرار والملفات', '🗂 Buttons & files designer', 'buttons:' + raw)]
+                        elif program.kind == 'contact':
+                            rows[0] = [button('✉️ إدارة التواصل', '✉️ Contact setup', 'contactsetup:' + raw)]
                         if record is not None and record.enabled and project.active_version:
                             op = 'stop' if project.status == 'running' else 'resume'
                             rows.append([menu.button(op, op + 'ask:' + raw)])
@@ -209,6 +227,13 @@ class BotManagement:
                         return menu.response(f'🤖 {project.name}\n{connected} · {status}\n\n' + tr('🟠 لديك تغييرات غير منشورة\n' if pending else '🟢 آخر التعديلات منشورة\n', '🟠 Unpublished changes\n' if pending else '🟢 Latest changes published\n')
                             + tr(f'الإصدار المنشور: {project.active_version or "—"}\nآخر مسودة: {version.version}',
                                  f'Published version: {project.active_version or "—"}\nLatest draft: {version.version}'), rows)
+                    if action == 'contactsetup':
+                        rows = [[button('💬 رسالة استقبال الزائر', '💬 Visitor greeting', 'welcome:' + raw)],
+                                [button('🚀 نشر وتشغيل', '🚀 Publish & run', 'launchask:' + raw)], back(project_id)]
+                        if project.telegram_username:
+                            rows.insert(0, [{'text': tr('↗ افتح بوت التواصل', '↗ Open contact bot'), 'url':'https://t.me/'+project.telegram_username}])
+                        return menu.response(tr('✉️ بوت التواصل\n\nرسائل الزوار ومرفقاتهم تصل لحساب صاحب المشروع داخل هذا البوت. للرد، استخدم «رد» على الرسالة الواردة.\nيمكنك حظر المرسل وإلغاء حظره من الأزرار. لا تُرسل رسائل صاحب البوت للزوار إلا عند الرد على رسالة مرتبطة.',
+                            '✉️ Contact bot\n\nVisitors and their attachments arrive in this bot for the project owner. Reply to an incoming message to answer.\nBlock/unblock controls are included. Unsolicited owner messages are not routed to visitors.'), rows)
                     if action == 'connection':
                         connected = '@' + project.telegram_username if project.telegram_username else tr('لم يتم الربط بعد', 'Not connected yet')
                         rows = [[button('🔗 ربط أو تحديث التوكن', '🔗 Connect or update token', 'bind:' + raw)]]

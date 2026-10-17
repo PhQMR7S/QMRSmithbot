@@ -293,7 +293,7 @@ async def test_text_bot_full_lifecycle(factory_database, monkeypatch):
         confirm = await processor.process(update(callback='launchask:' + str(project_id)))
         return await processor.process(update(callback=confirm['reply_markup']['inline_keyboard'][0][0]['callback_data']))
     assert '✅' in (await launch())['text']
-    assert fake.set_webhook.call_args.kwargs['allowed_updates'] == ['message']
+    assert fake.set_webhook.call_args.kwargs['allowed_updates'] == ['message', 'callback_query']
     async def reply(event):
         async with sessions() as session, session.begin():
             return await process_inline_update(session, project_id, event)
@@ -406,3 +406,159 @@ async def test_modern_editor_preferences_and_stale_buttons(factory_database):
             if other_id:
                 await session.execute(delete(AuditEvent).where(AuditEvent.actor_user_id == other_id))
                 await session.execute(delete(User).where(User.id == other_id))
+
+
+async def create_product_bot(factory_database, monkeypatch, kind):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from uuid import UUID
+
+    from cryptography.fernet import Fernet
+    processor, sessions, update, actor_id, _ = factory_database
+    monkeypatch.setattr(settings,'telegram_inline_runtime_enabled',True)
+    monkeypatch.setattr(settings,'telegram_ingress_base_url','https://ingress.example')
+    monkeypatch.setattr(settings,'telegram_factory_webhook_secret',SecretStr('S'*40))
+    monkeypatch.setattr(settings,'telegram_credential_encryption_key',SecretStr(Fernet.generate_key().decode()))
+    child_id = int(uuid4().hex[:10],16)+100000
+    fake = SimpleNamespace(session=SimpleNamespace(close=AsyncMock()),
+        get_me=AsyncMock(return_value=SimpleNamespace(id=child_id,username='product_test_bot',is_bot=True)),
+        set_webhook=AsyncMock(return_value=True))
+    async def info():
+        return SimpleNamespace(url=fake.set_webhook.call_args.kwargs['url'])
+    fake.get_webhook_info=info
+    monkeypatch.setattr('qmrsmithbot.factory.bot_management.make_bot',lambda token:fake)
+    await processor.process(update(callback='template:'+kind))
+    await processor.process(update(text=kind+' bot'))
+    review=await processor.process(update(text='Product welcome'))
+    created=await processor.process(update(callback=review['reply_markup']['inline_keyboard'][0][0]['callback_data']))
+    project_id=UUID(created['reply_markup']['inline_keyboard'][0][0]['callback_data'].split(':')[1])
+    await processor.process(update(callback='bind:'+str(project_id)))
+    await processor.process(update(text=f'{child_id}:'+ 'T'*35))
+    async def launch():
+        ask=await processor.process(update(callback='launchask:'+str(project_id)))
+        result=await processor.process(update(callback=ask['reply_markup']['inline_keyboard'][0][0]['callback_data']))
+        assert '✅' in result['text'], result['text']
+    async def deliver(*, text=None, callback=None, actor=None, document=None, reply_to=None):
+        from qmrsmithbot.telegram.inline_runtime import process_inline_update
+        event=update(text=text or 'media',callback=callback).model_dump(mode='json',exclude_none=True,by_alias=True)
+        person={'id':actor or actor_id,'is_bot':False,'first_name':'Visitor'}
+        message=event['callback_query']['message'] if callback else event['message']
+        message['chat']['id']=person['id']
+        message['from']=person
+        if callback:
+            event['callback_query']['from']=person
+            message['from']={'id':child_id,'is_bot':True,'first_name':'Bot'}
+        if document:
+            message.pop('text',None)
+            message['document']={'file_id':document,'file_unique_id':'unique','file_size':999999999}
+        if reply_to:
+            message['reply_to_message']={'message_id':reply_to,'date':1792230000,
+                'chat':{'id':person['id'],'type':'private'},'from':{'id':child_id,'is_bot':True,'first_name':'Bot'},'text':'Incoming'}
+        parsed=Update.model_validate(event)
+        async with sessions() as session, session.begin():
+            response=await process_inline_update(session,project_id,parsed)
+        return response, parsed
+    return project_id, child_id, launch, deliver
+
+
+@pytest.mark.asyncio
+async def test_button_bot_nested_drafts_files_publication_and_isolation(factory_database,monkeypatch):
+    from qmrsmithbot.db.factory_models import FactoryButtonRecord
+    from qmrsmithbot.telegram.inline_runtime import process_inline_update
+    processor,sessions,update,owner,_=factory_database
+    project_id,_,launch,deliver=await create_product_bot(factory_database,monkeypatch,'buttons')
+    await launch()
+    await processor.process(update(callback=f'bnew:{project_id.hex}:r:section'))
+    await processor.process(update(text='Courses'))
+    async with sessions() as session:
+        section=await session.scalar(select(FactoryButtonRecord).where(FactoryButtonRecord.project_id==project_id))
+        section_id=section.id
+    await processor.process(update(callback=f'bnew:{section_id.hex}:p:text'))
+    await processor.process(update(text='About'))
+    await processor.process(update(text='Detailed content'))
+    before,_=await deliver(text='/start',actor=owner+1)
+    assert 'Courses' not in str(before)
+    await launch()
+    root,_=await deliver(text='/start',actor=owner+1)
+    assert root['reply_markup']['inline_keyboard'][0][0]['text']=='Courses'
+    nested,_=await deliver(callback='b:'+section_id.hex,actor=owner+1)
+    assert nested['method']=='editMessageText' and 'About' in str(nested)
+    item_data=nested['reply_markup']['inline_keyboard'][0][0]['callback_data']
+    content,_=await deliver(callback=item_data,actor=owner+1)
+    assert content['text']=='Detailed content'
+    await processor.process(update(callback=f'bnew:{project_id.hex}:r:file'))
+    await processor.process(update(text='Lecture PDF'))
+    async with sessions() as session:
+        file=await session.scalar(select(FactoryButtonRecord).where(FactoryButtonRecord.project_id==project_id,
+            FactoryButtonRecord.draft['kind'].astext=='file'))
+        file_id=file.id
+    await deliver(text='/start upload_'+file_id.hex,actor=owner+1)
+    await deliver(document='visitor-file',actor=owner+1)
+    async with sessions() as session:
+        assert 'file_id' not in (await session.get(FactoryButtonRecord,file_id)).draft
+    await deliver(text='/start upload_'+file_id.hex)
+    received,event=await deliver(document='child-file-reference')
+    assert 'استلمت' in received['text']
+    # Same incoming file update is cached and cannot be re-applied.
+    async with sessions() as session, session.begin():
+        assert await process_inline_update(session,project_id,event)==received
+    await launch()
+    file_response,_=await deliver(callback='b:'+file_id.hex,actor=owner+1)
+    assert file_response['method']=='sendDocument' and file_response['document']=='child-file-reference'
+    ask=await processor.process(update(callback='bdel:'+section_id.hex))
+    await processor.process(update(callback=ask['reply_markup']['inline_keyboard'][0][0]['callback_data']))
+    assert (await deliver(callback=item_data,actor=owner+1))[0]['text']=='Detailed content'
+    await launch()
+    assert 'غير متاح' in (await deliver(callback=item_data,actor=owner+1))[0]['text']
+    assert (await deliver(callback='b:'+uuid4().hex,actor=owner+1))[0]['text'].startswith('هذا الزر غير متاح')
+
+
+@pytest.mark.asyncio
+async def test_contact_bot_routes_only_owner_replies_blocks_and_deduplicates(factory_database,monkeypatch):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from qmrsmithbot.db.factory_models import ContactDeliveryRecord
+    from qmrsmithbot.telegram.inline_runtime import process_inline_update
+    processor,sessions,update,owner,_=factory_database
+    project_id,_,launch,deliver=await create_product_bot(factory_database,monkeypatch,'contact')
+    await launch()
+    next_id=1000
+    async def copy(**kwargs):
+        nonlocal next_id
+        next_id+=1
+        return SimpleNamespace(message_id=next_id)
+    fake=SimpleNamespace(copy_message=AsyncMock(side_effect=copy))
+    @asynccontextmanager
+    async def client(self,project):
+        assert project==project_id
+        yield fake
+    monkeypatch.setattr('qmrsmithbot.telegram.product_runtime.TelegramBotClientFactory.bot',client)
+    visitor=owner+1
+    result,event=await deliver(text='Question',actor=visitor)
+    assert 'وصلت' in result['text']
+    assert fake.copy_message.call_args.kwargs['chat_id']==owner
+    async with sessions() as session,session.begin():
+        assert await process_inline_update(session,project_id,event)==result
+        route=await session.get(ContactDeliveryRecord,(project_id,1001))
+        assert route.visitor_id==visitor
+    assert fake.copy_message.await_count==1
+    await deliver(document='owner-answer',reply_to=1001)
+    assert fake.copy_message.call_args.kwargs['chat_id']==visitor
+    count=fake.copy_message.await_count
+    await deliver(text='Unsolicited owner message')
+    await deliver(text='Forged reply',reply_to=99999)
+    await deliver(callback=f'contact:block:{visitor}',actor=visitor)
+    assert fake.copy_message.await_count==count
+    assert 'تم الحظر' in (await deliver(callback=f'contact:block:{visitor}'))[0]['text']
+    await deliver(text='Blocked',actor=visitor)
+    assert fake.copy_message.await_count==count
+    await deliver(callback=f'contact:unblock:{visitor}')
+    await deliver(document='visitor-attachment',actor=visitor)
+    assert fake.copy_message.await_count==count+1
+    # Stop makes all messages inert, including owner replies.
+    ask=await processor.process(update(callback='stopask:'+str(project_id)))
+    await processor.process(update(callback=ask['reply_markup']['inline_keyboard'][0][0]['callback_data']))
+    assert (await deliver(text='Stopped',actor=visitor))[0] is None
+    assert fake.copy_message.await_count==count+1

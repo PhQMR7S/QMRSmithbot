@@ -1,4 +1,5 @@
 import secrets
+from copy import deepcopy
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -41,6 +42,9 @@ async def telegram_identity(session, actor):
 class SQLFactoryStore:
     def __init__(self, session, user, tenant_id):
         self.session, self.user, self.tenant_id = session, user, tenant_id
+        self._conversation_loaded = False
+        self._conversation = None
+        self._permissions = set()
         self.projects_service = ProjectService(SQLAlchemyProjectStore(session), audit=self.audit)
 
     async def audit(self, action, project_id, actor_user_id, tenant_id):
@@ -55,22 +59,32 @@ class SQLFactoryStore:
         self.user.language_code = language
         await self.session.flush()
 
+    async def _conversation_record(self):
+        if not self._conversation_loaded:
+            self._conversation = await self.session.get(FactoryConversationRecord, self.user.id)
+            self._conversation_loaded = True
+        return self._conversation
+
     async def state(self):
-        record = await self.session.get(FactoryConversationRecord, self.user.id)
-        return MenuState(record.step, dict(record.data)) if record else MenuState('idle', {})
+        record = await self._conversation_record()
+        return MenuState(record.step, deepcopy(record.data)) if record else MenuState('idle', {})
 
     async def save_state(self, state):
-        record = await self.session.get(FactoryConversationRecord, self.user.id)
+        record = await self._conversation_record()
         if record is None:
             record = FactoryConversationRecord(user_id=self.user.id)
             self.session.add(record)
+            self._conversation = record
         preferences = (record.data or {}).get('_ui', {})
         record.step, record.data = state.step, {**state.data, '_ui': state.data.get('_ui', preferences)}
         await self.session.flush()
 
     async def permission(self, permission):
+        if permission in self._permissions:
+            return
         await AuthorizationService(self.session).require_permission(
             user_id=self.user.id, tenant_id=self.tenant_id, permission=permission)
+        self._permissions.add(permission)
 
     async def projects(self, *, offset, limit):
         await self.permission(Permission.PROJECT_READ)

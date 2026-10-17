@@ -17,7 +17,7 @@ async def test_readiness_checks_database_and_hides_failure_details(failure):
             return self
 
         def scalar_one_or_none(self):
-            return '20261017_04'
+            return '20261017_05'
 
     async def session():
         yield Session()

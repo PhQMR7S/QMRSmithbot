@@ -1,3 +1,4 @@
+import asyncio
 import hmac
 import json
 import logging
@@ -22,10 +23,11 @@ def get_factory_processor():
     return FactoryProcessor()
 
 
-async def acknowledge_callback(callback_id):
-    bot = Bot(settings.telegram_factory_bot_token.get_secret_value(), session=AiohttpSession(timeout=5))
+async def acknowledge_callback(callback_id, token=None):
+    bot = Bot(token or settings.telegram_factory_bot_token.get_secret_value(), session=AiohttpSession(timeout=0.6))
     try:
-        await bot.answer_callback_query(callback_id)
+        async with asyncio.timeout(0.6):
+            await bot.answer_callback_query(callback_id)
     except (TelegramAPIError, OSError, TimeoutError):
         logger.warning('Factory callback acknowledgement failed')
     finally:
@@ -63,8 +65,11 @@ async def factory_webhook(
         raise HTTPException(status_code=400, detail='Invalid Telegram update') from exc
     if update.update_id < 0:
         raise HTTPException(status_code=400, detail='Invalid Telegram update ID')
-    if update.callback_query is not None:
-        await acknowledge_callback(update.callback_query.id)
-    result = await processor.process(update)
+    acknowledgement = asyncio.create_task(acknowledge_callback(update.callback_query.id)) if update.callback_query else None
+    try:
+        result = await processor.process(update)
+    finally:
+        if acknowledgement is not None:
+            await acknowledgement
     await delete_sensitive_message(update)
     return result if result is not None else Response(status_code=204)
