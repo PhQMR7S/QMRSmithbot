@@ -1,8 +1,8 @@
 """Regression coverage for unexpected errors in the durable inbox worker."""
+from typing import ClassVar
 from uuid import uuid4
 
 import pytest
-from typing import ClassVar
 
 from qmrsmithbot.telegram.queue import ClaimedTelegramUpdate
 from qmrsmithbot.telegram.worker import TelegramRuntimeWorker
