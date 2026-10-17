@@ -14,6 +14,10 @@ async def test_readiness_checks_database_and_hides_failure_details(failure):
         async def execute(self, _):
             if failure is not None:
                 raise failure
+            return self
+
+        def scalar_one_or_none(self):
+            return '20261017_02'
 
     async def session():
         yield Session()

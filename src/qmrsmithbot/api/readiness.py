@@ -25,6 +25,10 @@ async def readiness(session: Annotated[AsyncSession, Depends(readiness_session)]
             # Check the application schema and permissions, not just TCP connectivity.
             await session.execute(text('SELECT id, language_code FROM users LIMIT 0'))
             await session.execute(text('SELECT bot_id, update_id FROM factory_updates LIMIT 0'))
+            applied = await session.execute(text('SELECT version_num FROM alembic_version'))
+            if applied.scalar_one_or_none() != '20261017_02':
+                return JSONResponse(status_code=503, content={'status': 'unavailable'},
+                                    headers={'Cache-Control': 'no-store', 'Retry-After': '5'})
     except (SQLAlchemyError, OSError, TimeoutError):
         return JSONResponse(status_code=503, content={'status': 'unavailable'},
                             headers={'Cache-Control': 'no-store', 'Retry-After': '5'})

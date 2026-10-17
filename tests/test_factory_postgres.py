@@ -1,5 +1,6 @@
 """Opt-in PostgreSQL tests; use a disposable database with all migrations applied."""
 import asyncio
+import hashlib
 import os
 from uuid import uuid4
 
@@ -7,13 +8,14 @@ import pytest
 import pytest_asyncio
 from aiogram.types import Update
 from pydantic import SecretStr
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from qmrsmithbot.config import settings
 from qmrsmithbot.db.factory_models import FactoryUpdateRecord
 from qmrsmithbot.db.models import AuditEvent, BotProjectRecord, IdentityRecord, User
 from qmrsmithbot.factory.processor import FactoryProcessor
+from qmrsmithbot.rate_limit import PostgresRateLimiter
 
 pytestmark = pytest.mark.skipif(
     not os.getenv('QMRSMITH_INTEGRATION_DATABASE_URL'), reason='PostgreSQL integration is opt-in')
@@ -97,3 +99,28 @@ async def test_factory_wizard_creates_one_draft_with_real_constraints(factory_da
         assert len(projects) == 1
         assert projects[0].name == 'Integration draft'
         assert projects[0].status == 'draft'
+
+
+@pytest.mark.asyncio
+async def test_postgres_rate_limit_is_atomic_across_concurrent_sessions(factory_database):
+    _, sessions, _, _, _ = factory_database
+    limiter = PostgresRateLimiter(sessions)
+    key = 'integration:' + uuid4().hex
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    try:
+        results = await asyncio.gather(*(
+            limiter.check(key=key, limit=7, window_seconds=60) for _ in range(20)))
+        assert sum(result.allowed for result in results) == 7
+        async with sessions() as session, session.begin():
+            count = await session.scalar(text(
+                'SELECT count FROM security_rate_limits WHERE key=:key'), {'key': digest})
+            assert count == 7
+            await session.execute(text('UPDATE security_rate_limits '
+                "SET expires_at=statement_timestamp()-interval '1 second' WHERE key=:key"),
+                {'key': digest})
+        decision = await limiter.check(key=key, limit=7, window_seconds=60)
+        assert decision.allowed and decision.count == 1
+    finally:
+        async with sessions() as session, session.begin():
+            await session.execute(text('DELETE FROM security_rate_limits WHERE key=:key'),
+                                  {'key': digest})

@@ -13,7 +13,9 @@ until an actual execution consumer has been tested against a persistent database
 - **Dedicated PostgreSQL**: source of truth for projects, workflow versions, leases,
   idempotency, factory conversations, and update inbox. Never share another app's tables
   or deploy against an expiring free database as a production source of truth.
-- **Dedicated Redis-compatible endpoint**: production auth rate limiting. Check support
+- **Shared authentication rate limiter**: PostgreSQL is supported after migration
+  20261017_02 with RATE_LIMIT_BACKEND=postgresql; see POSTGRES_RATE_LIMITING.md.
+  Alternatively use a dedicated Redis-compatible endpoint. Check support
   for atomic Lua EVAL and sorted-set commands; REST-only interfaces cannot be used
   directly as REDIS_URL with redis-py without an appropriate protocol adapter.
 - **Durable consumer**: independently scheduled/hosted process or an authenticated,
@@ -29,7 +31,7 @@ until an actual execution consumer has been tested against a persistent database
 
 - [ ] Dedicated persistent PostgreSQL instance and backups configured
 - [ ] All Alembic migrations applied and checked against the deployed revision
-- [ ] Dedicated Redis endpoint supports the runtime's command set and is reachable
+- [ ] Selected shared rate-limit backend is reachable and rejects excess attempts
 - [ ] OIDC issuer, client, callback and session state secrets configured
 - [ ] Worker consumer deployed and demonstrated to handle inbox *and* action ledger
 - [ ] Queue retries, dead-letter behavior, restart recovery, and idempotency checked

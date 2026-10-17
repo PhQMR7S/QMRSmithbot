@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from qmrsmithbot.api.auth import router as auth_router
 from qmrsmithbot.api.dashboard import router as dashboard_router
@@ -138,6 +138,11 @@ async def telegram_webhook_error(_: Request, exc: TelegramWebhookError) -> JSONR
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "QMRSmithbot"}
+
+
+@app.get('/', include_in_schema=False)
+async def homepage() -> RedirectResponse:
+    return RedirectResponse(url='/dashboard', status_code=307)
 
 
 @app.exception_handler(ProjectStateError)

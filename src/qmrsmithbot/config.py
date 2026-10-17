@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
@@ -37,6 +38,7 @@ class Settings(BaseSettings):
     session_absolute_ttl_minutes: int = Field(default=480, ge=5, le=10080)
     session_idle_ttl_minutes: int = Field(default=30, ge=5, le=1440)
     rate_limit_enabled: bool = False
+    rate_limit_backend: Literal['redis', 'postgresql'] = 'redis'
     rate_limit_requests: int = Field(default=10, ge=1, le=10000)
     rate_limit_window_seconds: int = Field(default=60, ge=1, le=3600)
 

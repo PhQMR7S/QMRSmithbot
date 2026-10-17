@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -20,6 +21,17 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from qmrsmithbot.db.base import Base
 from qmrsmithbot.domain.models import BotStatus
+
+
+class SecurityRateLimitRecord(Base):
+    __tablename__ = 'security_rate_limits'
+    __table_args__ = (
+        CheckConstraint('count > 0', name='ck_security_rate_limit_count'),
+        Index('ix_security_rate_limits_expiry', 'expires_at'),
+    )
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    count: Mapped[int] = mapped_column(Integer, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class User(Base):
