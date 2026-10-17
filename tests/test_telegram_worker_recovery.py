@@ -1,5 +1,6 @@
 """Regression coverage for unexpected errors in the durable inbox worker."""
 from typing import ClassVar
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -89,3 +90,23 @@ async def test_handler_errors_do_not_leak_payload(monkeypatch, error, expected_m
     assert failure.get("terminal", False) is terminal
     assert failure["error"] == expected_message
     assert "secret" not in failure["error"]
+
+
+@pytest.mark.asyncio
+async def test_worker_survives_database_outage_and_can_stop(monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    from qmrsmithbot.telegram import worker as module
+
+    worker = TelegramRuntimeWorker(handler=None)
+    worker.run_once = AsyncMock(
+        side_effect=OperationalError("SELECT 1", {}, Exception("database unavailable"))
+    )
+
+    async def immediate_stop(awaitable, *, timeout):
+        worker.stop()
+        return await awaitable
+
+    monkeypatch.setattr(module.asyncio, "wait_for", immediate_stop)
+    await worker.run_forever()
+    assert worker.run_once.await_count == 1
