@@ -47,7 +47,7 @@ class TelegramRuntimeWorker:
                 await TelegramUpdateQueue(session).fail(
                     update_id=item.id,
                     claim_token=item.claim_token,
-                    error=str(exc),
+                    error=f"non-retryable handler error: {type(exc).__name__}",
                     retry_delay_seconds=0,
                     terminal=True,
                 )
@@ -60,7 +60,7 @@ class TelegramRuntimeWorker:
                 await TelegramUpdateQueue(session).fail(
                     update_id=item.id,
                     claim_token=item.claim_token,
-                    error=str(exc) or exc.__class__.__name__,
+                    error=f"retryable handler error: {type(exc).__name__}",
                     retry_delay_seconds=delay,
                 )
         except Exception as exc:  # noqa: BLE001 - isolate arbitrary plugin/handler failures
