@@ -194,5 +194,5 @@ async def test_appearance_survives_navigation_and_wizard():
     await menu.handle(callback='wizard:name')
     review = await menu.handle(text='New name')
     assert 'New name' in review['text'] and store.conversation.step == 'confirm'
-    await menu.handle(callback='ui:plain')
+    await menu.handle(text='/plain')
     assert store.conversation.data['_ui']['rich'] is False

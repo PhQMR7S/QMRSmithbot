@@ -9,6 +9,10 @@ async def experience(menu, *, text=None, callback=None):
     tr = lambda ar, en: ar if menu.lang == 'ar' else en
     def button(ar, en, data):
         return {'text': tr(ar, en), 'callback_data': data}
+    if text == '/plain':
+        callback = 'ui:plain'
+    elif text == '/appearance':
+        callback = 'appearance'
     state = await menu.store.state()
     ui = dict(state.data.get('_ui', {}))
     if callback and callback.startswith('ui:'):
@@ -24,8 +28,8 @@ async def experience(menu, *, text=None, callback=None):
     if callback == 'appearance':
         layout = ui.get('layout', 'cards')
         rich = ui.get('rich', False)
-        return menu.response(tr('🎛 تخصيص تجربتك\n\nاختر عرض بوتاتك وتنسيق اللوحات. تحفظ اختياراتك لحسابك.\nالرسائل الغنية تحتاج نسخة تيليجرام حديثة؛ تقدر ترجع للعرض البسيط بأي وقت.',
-            '🎛 Your experience\n\nChoose your bot layout and panel formatting. Preferences are saved to your account.\nRich messages need a recent Telegram client; plain mode remains available.'),
+        return menu.response(tr('🎛 تخصيص تجربتك\n\nاختر عرض بوتاتك وتنسيق اللوحات. تحفظ اختياراتك لحسابك.\nالرسائل الغنية تحتاج نسخة تيليجرام حديثة؛ للرجوع للعرض البسيط بأي وقت أرسل /plain.',
+            '🎛 Your experience\n\nChoose your bot layout and panel formatting. Preferences are saved to your account.\nRich messages need a recent Telegram client; send /plain at any time to restore plain mode.'),
             [[button(('✓ ' if layout == 'cards' else '')+'بطاقات', ('✓ ' if layout == 'cards' else '')+'Cards', 'ui:cards'),
               button(('✓ ' if layout == 'list' else '')+'قائمة مختصرة', ('✓ ' if layout == 'list' else '')+'Compact list', 'ui:list')],
              [button(('✓ ' if rich else '')+'رسائل غنية', ('✓ ' if rich else '')+'Rich messages', 'ui:rich'),

@@ -379,8 +379,8 @@ async def test_modern_editor_preferences_and_stale_buttons(factory_database):
     content = await processor.process(update(callback=f'content:{project_id}'))
     button = next(b['callback_data'] for row in content['reply_markup']['inline_keyboard'] for b in row if b.get('callback_data', '').startswith('ri:'))
     item = await processor.process(update(callback=button))
-    delete = item['reply_markup']['inline_keyboard'][0][1]['callback_data']
-    confirm = await processor.process(update(callback=delete))
+    delete_button = item['reply_markup']['inline_keyboard'][0][1]['callback_data']
+    confirm = await processor.process(update(callback=delete_button))
     confirmation = confirm['reply_markup']['inline_keyboard'][0][0]['callback_data']
     await processor.process(update(callback=confirmation))
     await processor.process(update(callback=confirmation))  # Single-use deletion.

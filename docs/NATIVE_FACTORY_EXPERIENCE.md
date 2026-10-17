@@ -24,7 +24,7 @@ Current Telegram features used: native success/primary/danger button styles, edi
 and optional sendRichMessage/edited rich content with escaped HTML and RTL. These payloads
 are validated against aiogram 3.31+ models and the official Bot API documentation. Rich mode
 is opt-in because client rendering must be checked on the user's Telegram installation.
-Plain mode can be selected from Appearance or /start > Appearance.
+Plain mode can be restored with /plain even if a client cannot display its rich panel; /appearance also opens preferences directly.
 
 Custom emoji eligibility, all forms of media, polls, guest mode, communities, payments and
 a fully designed Mini App are not implemented by this change. It must not be advertised as
