@@ -26,6 +26,8 @@ def test_database_schema_contains_expected_tables() -> None:
         "security_rate_limits",
         "telegram_login_challenges",
         "factory_updates",
+        "telegram_inline_bots",
+        "telegram_inline_updates",
         "factory_conversations",
         "identities",
         "sessions",

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from qmrsmithbot.auth.authorization import AuthorizationService
 from qmrsmithbot.auth.models import Permission
 from qmrsmithbot.config import settings
+from qmrsmithbot.db.factory_models import TelegramInlineBotRecord
 from qmrsmithbot.db.models import BotCredentialRecord, BotProjectRecord
 from qmrsmithbot.db.telegram_runtime_models import TelegramWebhookStateRecord
 from qmrsmithbot.telegram.client import TelegramBotClientFactory
@@ -66,6 +67,9 @@ class TelegramWebhookService:
         if project is None or credential is None or project.telegram_bot_id is None:
             raise TelegramWebhookNotReady("Telegram bot provisioning is required first")
 
+        inline = await self.session.get(TelegramInlineBotRecord, project_id)
+        if inline is not None and inline.enabled:
+            raise TelegramWebhookNotReady('Manage this bot through its factory panel')
         if not settings.telegram_runtime_consumer_verified:
             raise TelegramWebhookNotReady(
                 "Generated-bot runtime consumer has not been verified; webhook activation is disabled"

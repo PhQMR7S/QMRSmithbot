@@ -1,6 +1,7 @@
 import hmac
 import json
 import logging
+import re
 from typing import Annotated
 
 from aiogram import Bot
@@ -31,6 +32,20 @@ async def acknowledge_callback(callback_id):
         await bot.session.close()
 
 
+async def delete_sensitive_message(update):
+    message = update.message
+    if (message is None or message.chat.type != 'private' or not message.text
+            or not re.search(r'\b[0-9]{5,16}:[A-Za-z0-9_-]{20,}\b', message.text)):
+        return
+    bot = Bot(settings.telegram_factory_bot_token.get_secret_value(), session=AiohttpSession(timeout=3))
+    try:
+        await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+    except (TelegramAPIError, OSError, TimeoutError):
+        logger.warning('Sensitive factory message deletion failed')
+    finally:
+        await bot.session.close()
+
+
 @router.post('/webhook')
 async def factory_webhook(
     request: Request,
@@ -49,6 +64,7 @@ async def factory_webhook(
     if update.update_id < 0:
         raise HTTPException(status_code=400, detail='Invalid Telegram update ID')
     result = await processor.process(update)
+    await delete_sensitive_message(update)
     if update.callback_query is not None:
         await acknowledge_callback(update.callback_query.id)
     return result if result is not None else Response(status_code=204)

@@ -6,6 +6,7 @@ from qmrsmithbot.auth.authorization import AuthorizationDenied
 from qmrsmithbot.config import settings
 from qmrsmithbot.db.factory_models import FactoryUpdateRecord
 from qmrsmithbot.db.session import SessionFactory
+from qmrsmithbot.factory.bot_management import BotManagement
 from qmrsmithbot.factory.menu import FactoryMenu
 from qmrsmithbot.factory.store import factory_store
 from qmrsmithbot.factory.web_login import handle_web_login
@@ -47,7 +48,7 @@ class FactoryProcessor:
                 return None
             store = await factory_store(session, actor)
             menu = FactoryMenu(store, telegram_id=actor.id,
-                               admin=actor.id in settings.telegram_factory_admin_ids)
+                               admin=actor.id in settings.telegram_factory_admin_ids, management=BotManagement(store))
             try:
                 message_text = update.message.text if update.message else None
                 response = await handle_web_login(session, store, telegram_id=actor.id,

@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     telegram_factory_username: str = ''
     auth_telegram_enabled: bool = False
     telegram_runtime_consumer_verified: bool = False
+    telegram_inline_runtime_enabled: bool = False
+    telegram_ingress_base_url: str = ''
     telegram_factory_webhook_secret: SecretStr = SecretStr("")
     telegram_credential_encryption_key: SecretStr = SecretStr("")
     telegram_webhook_base_url: str = ""

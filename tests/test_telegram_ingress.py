@@ -59,3 +59,29 @@ async def test_ingress_fails_closed_when_configuration_is_missing(ingress, monke
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=ingress.app),
                                  base_url='https://ingress.test') as client:
         assert (await client.post('/webhook', json={'update_id': 1})).status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_child_ingress_isolates_secrets_and_upstream_paths(ingress):
+    import hashlib
+    import hmac
+    from uuid import uuid4
+    project_id = uuid4()
+    secret = hmac.new(('S'*40).encode(), ('child:' + str(project_id)).encode(), hashlib.sha256).hexdigest()
+    seen = []
+    class Client:
+        async def post(self, url, **kwargs):
+            seen.append((url, kwargs))
+            return httpx.Response(200, json={'method': 'sendMessage', 'chat_id': 1, 'text': 'Hi'})
+    async def client_override():
+        yield Client()
+    ingress.app.dependency_overrides[ingress.upstream_client] = client_override
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=ingress.app), base_url='https://ingress.test') as client:
+        path = '/bots/' + str(project_id)
+        assert (await client.post(path, json={'update_id': 1}, headers={'X-Telegram-Bot-Api-Secret-Token': 'S'*40})).status_code == 401
+        headers = {'X-Telegram-Bot-Api-Secret-Token': secret}
+        assert (await client.post('/bots/' + str(uuid4()), json={'update_id': 1}, headers=headers)).status_code == 401
+        assert (await client.post(path, json={'update_id': 1}, headers=headers)).status_code == 200
+    assert len(seen) == 1
+    assert seen[0][0] == 'https://private-factory.vercel.app/api/v1/telegram/inline/' + str(project_id)
+    assert seen[0][1]['headers']['X-Telegram-Bot-Api-Secret-Token'] == secret

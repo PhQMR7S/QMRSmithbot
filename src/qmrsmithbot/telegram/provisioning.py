@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from qmrsmithbot.auth.authorization import AuthorizationService
 from qmrsmithbot.auth.models import Permission
 from qmrsmithbot.config import settings
+from qmrsmithbot.db.factory_models import TelegramInlineBotRecord
 from qmrsmithbot.db.models import BotCredentialRecord, BotProjectRecord
 from qmrsmithbot.db.telegram_runtime_models import TelegramWebhookStateRecord
 
@@ -76,6 +77,11 @@ class TelegramBotProvisioningService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def _require_no_inline_runtime(self, project_id):
+        state = await self.session.get(TelegramInlineBotRecord, project_id)
+        if state is not None and state.enabled:
+            raise TelegramProvisioningError('Manage this bot through its factory panel')
+
     async def provision(
         self,
         *,
@@ -88,6 +94,7 @@ class TelegramBotProvisioningService:
         await authorization.require_permission(
             user_id=user_id, tenant_id=tenant_id, permission=Permission.PROJECT_WRITE
         )
+        await self._require_no_inline_runtime(project_id)
         token = raw_bot_token.strip()
         if not token or len(token) > 512:
             raise TelegramBotTokenInvalid("invalid Telegram bot token")
@@ -171,6 +178,7 @@ class TelegramBotProvisioningService:
         await authorization.require_permission(
             user_id=user_id, tenant_id=tenant_id, permission=Permission.PROJECT_WRITE
         )
+        await self._require_no_inline_runtime(project_id)
         webhook_state = await self.session.scalar(
             select(TelegramWebhookStateRecord.status).where(
                 TelegramWebhookStateRecord.project_id == project_id
@@ -213,6 +221,7 @@ class TelegramBotProvisioningService:
         credential = await self.session.scalar(
             select(BotCredentialRecord).where(BotCredentialRecord.project_id == project_id)
         )
+        await self._require_no_inline_runtime(project_id)
         if credential is not None:
             await self.session.delete(credential)
         project.telegram_bot_id = None

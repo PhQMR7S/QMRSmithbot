@@ -12,7 +12,7 @@ COPY = {
            'welcome': 'اكتب رسالة البداية (حتى 3000 حرف).',
            'rules': 'كل سطر: الكلمة أو الأمر | الرد\nالأوامر بدون /. حتى 100 رد.',
            'confirm': 'إنشاء المسودة', 'summary': 'راجع المسودة قبل الإنشاء',
-           'created': '✅ تم إنشاء المسودة. ربط توكن البوت والنشر والتشغيل يحتاج إعداد الخدمة.',
+           'created': '✅ مشروعك جاهز. افتح لوحة البوت لربط التوكن ومعاينة المحتوى ونشره.',
            'empty': 'ما عندك مشاريع بعد.', 'invalid': 'الإدخال غير صحيح. حاول مجددًا أو /cancel.',
            'draft': 'مسودة', 'running': 'يعمل', 'stopped': 'متوقف', 'error': 'خطأ',
            'stop': '⏸ إيقاف', 'resume': '▶ استئناف', 'stopask': 'تأكيد الإيقاف؟ قد تكتمل المهام التي بدأت.',
@@ -26,7 +26,7 @@ COPY = {
            'welcome': 'Send the welcome message (up to 3000 characters).',
            'rules': 'One line: keyword or command | reply\nCommands omit /. Up to 100 replies.',
            'confirm': 'Create draft', 'summary': 'Review before creating',
-           'created': '✅ Draft created. Bot credentials, publishing and runtime setup are still required.',
+           'created': '✅ Project ready. Open its panel to connect, preview and publish.',
            'empty': 'No projects yet.', 'invalid': 'Invalid input. Try again or /cancel.',
            'draft': 'Draft', 'running': 'Running', 'stopped': 'Stopped', 'error': 'Error',
            'stop': '⏸ Stop', 'resume': '▶ Resume', 'stopask': 'Confirm stop? In-flight tasks may finish.',
@@ -45,7 +45,8 @@ class MenuState:
 
 class FactoryMenu:
     """Transport-independent menu/wizard. Store methods are scoped by authenticated identity."""
-    def __init__(self, store, *, telegram_id: int, admin: bool = False):
+    def __init__(self, store, *, telegram_id: int, admin: bool = False, management=None):
+        self.management = management
         self.store = store
         self.telegram_id = telegram_id
         self.admin = admin
@@ -64,15 +65,22 @@ class FactoryMenu:
         await self.store.save_state(MenuState('idle', {}))
         rows = [[self.button('create', 'create'), self.button('projects', 'projects:0')],
                 [self.button('language', 'language')]]
+        if self.management is not None:
+            rows.append([{'text': '📊 إحصائياتي' if self.lang == 'ar' else '📊 Statistics', 'callback_data': 'stats'},
+                         {'text': '🧭 المساعدة' if self.lang == 'ar' else '🧭 Help', 'callback_data': 'help'}])
         if self.admin:
             rows.append([self.button('admin', 'admin')])
         return self.response(self.text('home'), rows)
 
     async def handle(self, *, text=None, callback=None):
         self.lang = await self.store.language()
+        if self.management is not None:
+            response = await self.management.handle(self, text=text, callback=callback)
+            if response is not None:
+                return response
         if text and re.search(r'\b[0-9]{5,16}:[A-Za-z0-9_-]{20,}\b', text):
-            return self.response('لا ترسل التوكن هنا؛ الربط غير مفعّل بعد.' if self.lang == 'ar'
-                                 else 'Do not send tokens here; bot linking is not enabled yet.')
+            return self.response('افتح لوحة البوت ثم اختر ربط التوكن.' if self.lang == 'ar'
+                                 else 'Open your bot panel and choose Connect token.')
         if text and text.split(maxsplit=1) and text.split(maxsplit=1)[0] == '/start':
             text = '/start'
         if text in ('/start', '/cancel') or callback == 'home':
@@ -158,9 +166,13 @@ class FactoryMenu:
             options = TemplateOptions.model_validate(state.data['options'])
             template = get_template(state.data['template'])
             definition = template.build(options).model_dump(mode='json')
-            await self.store.create(state.data['name'], definition)
+            project = await self.store.create(state.data['name'], definition)
             await self.store.save_state(MenuState('idle', {}))
-            return self.response(self.text('created'))
+            rows = None
+            if project is not None and self.management is not None:
+                rows = [[{'text': '🤖 لوحة البوت' if self.lang == 'ar' else '🤖 Bot panel',
+                          'callback_data': f'project:{project.id}'}], [self.button('back', 'home')]]
+            return self.response(self.text('created'), rows)
         if callback or not text:
             return self.response(self.text('invalid'))
         data = deepcopy(state.data)

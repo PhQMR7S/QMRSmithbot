@@ -246,3 +246,70 @@ async def test_telegram_login_http_to_session_and_logout(factory_database, monke
             assert (await client.get('/api/v1/auth/me', headers=headers)).status_code == 401
     finally:
         app.dependency_overrides.pop(get_session, None)
+
+
+@pytest.mark.asyncio
+async def test_text_bot_full_lifecycle(factory_database, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from uuid import UUID
+
+    from cryptography.fernet import Fernet
+
+    from qmrsmithbot.db.factory_models import FactoryConversationRecord, TelegramInlineBotRecord
+    from qmrsmithbot.db.models import BotCredentialRecord
+    from qmrsmithbot.telegram.inline_runtime import process_inline_update
+
+    processor, sessions, update, _, _ = factory_database
+    monkeypatch.setattr(settings, 'telegram_inline_runtime_enabled', True)
+    monkeypatch.setattr(settings, 'telegram_ingress_base_url', 'https://ingress.example')
+    monkeypatch.setattr(settings, 'telegram_factory_webhook_secret', SecretStr('S'*40))
+    monkeypatch.setattr(settings, 'telegram_credential_encryption_key', SecretStr(Fernet.generate_key().decode()))
+    child_id = int(uuid4().hex[:10], 16) + 100000
+    child_token = f'{child_id}:' + 'T'*35
+    fake = SimpleNamespace(session=SimpleNamespace(close=AsyncMock()),
+        get_me=AsyncMock(return_value=SimpleNamespace(id=child_id, username='child_test_bot', is_bot=True)),
+        set_webhook=AsyncMock(return_value=True))
+    async def webhook_info():
+        return SimpleNamespace(url=fake.set_webhook.call_args.kwargs['url'])
+    fake.get_webhook_info = webhook_info
+    monkeypatch.setattr('qmrsmithbot.factory.bot_management.make_bot', lambda token: fake)
+    await processor.process(update(callback='template:welcome'))
+    await processor.process(update(text='Lifecycle bot'))
+    review = await processor.process(update(text='First greeting'))
+    created = await processor.process(update(callback=review['reply_markup']['inline_keyboard'][0][0]['callback_data']))
+    panel = created['reply_markup']['inline_keyboard'][0][0]['callback_data']
+    project_id = UUID(panel.split(':')[1])
+    await processor.process(update(callback='bind:' + str(project_id)))
+    connected = await processor.process(update(text=child_token))
+    assert 'child_test_bot' in connected['text']
+    async with sessions() as session:
+        credential = await session.get(BotCredentialRecord, project_id)
+        assert child_token not in credential.token_ciphertext
+        project = await session.get(BotProjectRecord, project_id)
+        conversation = await session.get(FactoryConversationRecord, project.owner_id)
+        assert child_token not in str(conversation.data)
+    async def launch():
+        confirm = await processor.process(update(callback='launchask:' + str(project_id)))
+        return await processor.process(update(callback=confirm['reply_markup']['inline_keyboard'][0][0]['callback_data']))
+    assert '✅' in (await launch())['text']
+    assert fake.set_webhook.call_args.kwargs['allowed_updates'] == ['message']
+    async def reply(event):
+        async with sessions() as session, session.begin():
+            return await process_inline_update(session, project_id, event)
+    first = update(text='/start')
+    assert (await reply(first))['text'] == 'First greeting'
+    assert await reply(first) == await reply(first)
+    await processor.process(update(callback='welcome:' + str(project_id)))
+    await processor.process(update(text='Second greeting'))
+    assert (await reply(update(text='/start')))['text'] == 'First greeting'
+    assert '✅' in (await launch())['text']
+    assert (await reply(update(text='/start')))['text'] == 'Second greeting'
+    confirm = await processor.process(update(callback='stopask:' + str(project_id)))
+    await processor.process(update(callback=confirm['reply_markup']['inline_keyboard'][0][0]['callback_data']))
+    assert await reply(update(text='/start')) is None
+    confirm = await processor.process(update(callback='resumeask:' + str(project_id)))
+    await processor.process(update(callback=confirm['reply_markup']['inline_keyboard'][0][0]['callback_data']))
+    assert (await reply(update(text='/start')))['text'] == 'Second greeting'
+    async with sessions() as session:
+        assert (await session.get(TelegramInlineBotRecord, project_id)).enabled

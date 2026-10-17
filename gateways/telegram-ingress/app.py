@@ -1,9 +1,11 @@
 """Public Telegram-only ingress. Private Vercel credentials stay on the server."""
+import hashlib
 import hmac
 import json
 import os
 from typing import Annotated
 from urllib.parse import urlsplit
+from uuid import UUID
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -25,7 +27,21 @@ async def health():
 
 @app.post('/webhook')
 async def webhook(request: Request, client: Annotated[httpx.AsyncClient, Depends(upstream_client)]):
-    secret = os.environ.get('TELEGRAM_FACTORY_WEBHOOK_SECRET', '')
+    return await forward(request, client, '/api/v1/factory/webhook',
+                         os.environ.get('TELEGRAM_FACTORY_WEBHOOK_SECRET', ''))
+
+
+@app.post('/bots/{project_id}')
+async def child_webhook(project_id: UUID, request: Request,
+        client: Annotated[httpx.AsyncClient, Depends(upstream_client)]):
+    key = os.environ.get('TELEGRAM_FACTORY_WEBHOOK_SECRET', '')
+    if len(key) < 32:
+        raise HTTPException(status_code=503, detail='Ingress is unavailable', headers=HEADERS)
+    secret = hmac.new(key.encode(), ('child:' + str(project_id)).encode(), hashlib.sha256).hexdigest()
+    return await forward(request, client, '/api/v1/telegram/inline/' + str(project_id), secret)
+
+
+async def forward(request, client, path, secret):
     bypass = os.environ.get('FACTORY_PROTECTION_BYPASS', '')
     origin = os.environ.get('FACTORY_ORIGIN', '').rstrip('/')
     parsed = urlsplit(origin)
@@ -60,7 +76,7 @@ async def webhook(request: Request, client: Annotated[httpx.AsyncClient, Depends
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail='Invalid Telegram update', headers=HEADERS) from exc
     try:
-        result = await client.post(origin + '/api/v1/factory/webhook', content=bytes(body),
+        result = await client.post(origin + path, content=bytes(body),
             headers={'Content-Type': 'application/json', 'x-vercel-protection-bypass': bypass,
                      'X-Telegram-Bot-Api-Secret-Token': secret})
         if result.status_code == 204:

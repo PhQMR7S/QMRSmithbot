@@ -30,7 +30,7 @@ async def readiness(session: Annotated[AsyncSession, Depends(readiness_session)]
                 await session.execute(text(
                     'SELECT key, count, expires_at FROM security_rate_limits LIMIT 0'))
             applied = await session.execute(text('SELECT version_num FROM alembic_version'))
-            if applied.scalar_one_or_none() != '20261017_03':
+            if applied.scalar_one_or_none() != '20261017_04':
                 return JSONResponse(status_code=503, content={'status': 'unavailable'},
                                     headers={'Cache-Control': 'no-store', 'Retry-After': '5'})
     except (SQLAlchemyError, OSError, TimeoutError):
