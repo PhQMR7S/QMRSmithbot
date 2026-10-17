@@ -63,7 +63,7 @@ class TelegramRuntimeWorker:
                     error=str(exc) or exc.__class__.__name__,
                     retry_delay_seconds=delay,
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - isolate arbitrary plugin/handler failures
             # Unexpected handler errors must not terminate the consumer loop or
             # strand a claim until lease expiry. Do not persist arbitrary exception
             # messages: they may contain user input or credentials.
