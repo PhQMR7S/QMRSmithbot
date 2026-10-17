@@ -4,6 +4,7 @@ import hashlib
 import os
 from uuid import uuid4
 
+import httpx
 import pytest
 import pytest_asyncio
 from aiogram.types import Update
@@ -213,3 +214,35 @@ async def test_browser_can_cancel_before_telegram_approval(factory_database, mon
     async with sessions() as session, session.begin():
         with pytest.raises(TelegramLoginError):
             await TelegramLoginService(session).bind(challenge['challenge_id'], actor_id)
+
+
+@pytest.mark.asyncio
+async def test_telegram_login_http_to_session_and_logout(factory_database, monkeypatch):
+    from qmrsmithbot.api.app import app
+    from qmrsmithbot.db.session import get_session
+    processor, sessions, update, _, _ = factory_database
+    monkeypatch.setattr(settings, 'auth_telegram_enabled', True)
+    monkeypatch.setattr(settings, 'telegram_factory_username', 'qmrsmith_test_bot')
+    monkeypatch.setattr(settings, 'rate_limit_enabled', False)
+    async def session_override():
+        async with sessions() as session, session.begin():
+            yield session
+    app.dependency_overrides[get_session] = session_override
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='https://test') as client:
+            started = await client.post('/api/v1/auth/telegram/start')
+            assert started.status_code == 200 and started.headers['cache-control'] == 'no-store'
+            challenge = started.json()
+            body = {key: challenge[key] for key in ('challenge_id', 'browser_secret')}
+            assert (await client.post('/api/v1/auth/telegram/finish', json=body)).status_code == 202
+            await processor.process(update(text='/start login_' + challenge['challenge_id']))
+            await processor.process(update(text=challenge['verification_code']))
+            finished = await client.post('/api/v1/auth/telegram/finish', json=body)
+            assert finished.status_code == 200 and finished.headers['cache-control'] == 'no-store'
+            headers = {'Authorization': 'Bearer ' + finished.json()['access_token']}
+            assert (await client.get('/api/v1/auth/me', headers=headers)).status_code == 200
+            assert (await client.post('/api/v1/auth/telegram/finish', json=body)).status_code == 401
+            assert (await client.post('/api/v1/auth/logout', headers=headers)).status_code == 204
+            assert (await client.get('/api/v1/auth/me', headers=headers)).status_code == 401
+    finally:
+        app.dependency_overrides.pop(get_session, None)

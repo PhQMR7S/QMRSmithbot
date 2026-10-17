@@ -40,3 +40,8 @@ def test_telegram_login_configuration_requires_factory_and_username():
         Settings(**common, telegram_factory_username='@wrong')
     valid = Settings(**common, telegram_factory_username='qmrsmith_test_bot')
     assert valid.auth_telegram_enabled
+    production = Settings(**common, telegram_factory_username='qmrsmith_test_bot',
+        app_env='production', auth_dev_bootstrap_enabled=False, rate_limit_enabled=True,
+        rate_limit_backend='postgresql', database_url='postgresql+asyncpg://app:secret@db/qmrsmith',
+        telegram_credential_encryption_key=SecretStr('BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB='))
+    assert production.auth_telegram_enabled and not production.auth_oidc_enabled
