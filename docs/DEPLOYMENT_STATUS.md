@@ -1,58 +1,59 @@
 # Preview deployment status — 2026-10-17
 
 Repository: PhQMR7S/QMRSmithbot. Branch: feat/account-language-preferences / PR #23.
-Main is not merged. No Telegram webhook has been activated.
+Main remains unmerged. No Telegram webhook has been activated and no paid plan was enabled.
 
-## Database and application role
+## Database
 
-The qmrsmithbot database uses the existing Neon project and shares its compute/quotas.
-It has separate application tables from neondb. Migrations are applied through 20261017_02.
-The application connects as qmrsmith_app, with an independently generated password and no
-superuser, create-role, create-database, replication or neon_superuser membership.
-It has application-table DML, sequence use, and read-only SELECT on alembic_version.
-Credentials are stored only in encrypted Vercel Preview environment variables.
+Database qmrsmithbot is separate from neondb application tables but shares the existing Neon
+project's compute and quotas. Migrations are applied through 20261017_03.
+The application uses qmrsmith_app with independently generated credentials and no elevated
+Neon/PostgreSQL role membership. It has application-table DML, sequence use and read-only
+SELECT on alembic_version; it cannot change the migration version.
 
-Committed insert/read/delete checks succeeded as the application role. Existing neondb tables
-were not changed. Migration execution revealed historical revision identifiers too long for
-Alembic's default 32-character field; the initial migration now widens the version field.
+## Implemented and verified
 
-## Reliability changes
+- Factory update deduplication includes the factory bot ID and commits atomically with menu
+  state and draft creation. Real PostgreSQL tests cover concurrent duplicate updates.
+- PostgreSQL authentication rate limiting is enabled in Preview, with atomic shared fixed
+  windows, hashed keys, bounded cleanup and failure-closed behavior. Redis remains optional.
+- /ready verifies application schema, permissions and expected revision; /health is liveness.
+- Optional browser-bound Telegram login now shares the factory's Telegram identity and
+  workspace. It uses a five-minute challenge, a code absent from the deep link, a separate
+  browser secret, a five-attempt lock, explicit bot confirmation, one-time session issuance
+  and server-side cancellation. Raw codes/secrets/session tokens are not persisted.
+- The dashboard discovers enabled providers and provides Telegram start/pending/cancel/finish
+  states. Login and session secrets remain in page memory. Arabic/English and desktop/mobile
+  flows are supported. Neither sign-in provider is enabled until its deployment is configured.
 
-Factory update markers now include the configured factory bot ID. Previously the processor
-omitted a required component of the primary key, which would fail against real PostgreSQL.
-The PostgreSQL integration job verifies concurrent duplicate delivery, language persistence,
-internal/Telegram identity separation and one-time draft creation with real constraints.
+Verified deployment of commit 66b0bb539ac0c2b9d9eb6f14b13c1c7897348381:
+https://qmrsmithbot-db359beyy-phqmr7s.vercel.app/dashboard
 
-An optional PostgreSQL authentication limiter removes the requirement for a separate Redis
-service for this control. It uses atomic fixed windows, database time, hashed keys, bounded
-expiry cleanup and failure-closed behavior. Redis remains available as a separate backend.
-Preview uses RATE_LIMIT_ENABLED=true and RATE_LIMIT_BACKEND=postgresql.
+Its /ready endpoint returned 200, and /api/v1/auth/methods correctly reported both providers
+disabled. This is not a successful real Telegram sign-in.
 
-The /ready endpoint checks application tables and the expected schema revision with a
-five-second query deadline. It returns generic 503 responses without connection details,
-and no-store headers. /health remains a liveness check. The root path redirects to /dashboard.
+CI run 39026769267 passed quality, runtime-only packaging and all seven PostgreSQL integration
+scenarios. These include concurrency, expiry, cancellation, wrong-browser/other-actor rejection,
+five failed codes and a correct fifth code. 232 local tests passed (seven PostgreSQL cases
+are opt-in locally and passed in CI).
 
-## Verification
+Playwright with locally launched Chromium tested desktop 1366x900 and mobile 390x844:
+login code display, pending status, server-cancel request, finish, logout, memory-only secrets,
+no horizontal overflow and no JavaScript errors. The existing management browser flow also
+passed. Browser API responses were mocked; this does not establish Telegram transport.
+Screenshots were visually reviewed. Browser plugin was unavailable. A new browser CI job runs
+both flows and retains QA screenshots as GitHub artifacts.
 
-Preview commit 9a5ff30bda05beb2f3d671e0b002838f7d6a3f11:
-https://qmrsmithbot-9dvlymasj-phqmr7s.vercel.app/dashboard
+## Release requirements still open
 
-Verified /ready returns 200 from Vercel using the restricted application role.
-An OIDC-start request reached the configured PostgreSQL rate limiter and persisted a counter;
-the request then returned the expected provider-unavailable response because OIDC is not configured.
-This is not a successful login.
+Configure and verify the factory token, actual bot username, encryption/webhook secrets and a
+public HTTPS origin reachable by Telegram. Vercel preview authentication currently blocks
+Telegram transport; deployment protection has not been disabled.
+Keep AUTH_TELEGRAM_ENABLED=false and TELEGRAM_FACTORY_ENABLED=false until real delivery is
+tested. Production may use configured OIDC or the explicitly configured Telegram provider;
+development bootstrap stays disabled and shared authentication rate limiting stays enabled.
 
-PostgreSQL 18 CI passed migrations twice plus three integration scenarios, including 20
-concurrent rate-limit checks and expired-window reset. The runtime-only packaging job passed.
-The quality job exposed the expected-schema test needing the new security_rate_limits table;
-the follow-up commit corrects that expected set. Record the final CI run result before release.
-
-## Remaining release requirements
-
-OIDC identity provider and account linking, factory credentials, public reachable webhook
-origin, durable generated-bot consumers and advanced templates remain incomplete.
-Factory and generated-bot activation gates remain disabled, deployment protection stays enabled,
-and no paid plan was activated. A ready HTTP database probe does not establish Telegram delivery.
-
-Before public release, verify production identity, durable inbox and action-ledger consumption,
-retry recovery, actual Telegram delivery and the complete create/publish/bind/stop/resume flow.
+Generated-bot durable inbox and action-ledger consumers, public activation, account linking
+between pre-existing OIDC and Telegram identities, advanced templates and full platform admin
+remain incomplete. Complete and validate the real create/publish/bind/deliver/retry/stop/resume
+flow before describing the factory as production-ready.

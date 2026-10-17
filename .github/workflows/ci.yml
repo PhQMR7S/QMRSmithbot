@@ -10,6 +10,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  browser:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install runtime and browser test dependencies
+        run: |
+          pip install .
+          npm install --prefix "$RUNNER_TEMP/browser" playwright@1.62.1 --no-audit --no-fund
+          node "$RUNNER_TEMP/browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Verify dashboard and Telegram login on desktop and mobile
+        env:
+          NODE_PATH: ${{ runner.temp }}/browser/node_modules
+          QA_SCREENSHOT_DIR: ${{ runner.temp }}/qmrsmith-browser-evidence
+          BASE_URL: http://127.0.0.1:8877
+        run: |
+          mkdir -p "$QA_SCREENSHOT_DIR"
+          python -m uvicorn qmrsmithbot.api.app:app --host 127.0.0.1 --port 8877 &
+          app_pid=$!
+          trap 'kill "$app_pid"' EXIT
+          curl --fail --silent --retry 20 --retry-connrefused --retry-delay 1 "$BASE_URL/health"
+          node tests/dashboard.browser.cjs
+          node tests/telegram_login.browser.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-qa-evidence
+          path: ${{ runner.temp }}/qmrsmith-browser-evidence
+          retention-days: 7
+          if-no-files-found: ignore
+
   postgres-migrations:
     runs-on: ubuntu-latest
     permissions:

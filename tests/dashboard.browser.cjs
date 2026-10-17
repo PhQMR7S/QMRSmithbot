@@ -1,7 +1,7 @@
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict');
 (async()=>{
-const browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.CHROMIUM_EXECUTABLE_PATH}:{}),args:['--no-sandbox']});const page=await browser.newPage({viewport:{width:1586,height:992}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+const browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.CHROMIUM_EXECUTABLE_PATH}:{}),args:['--no-sandbox','--no-zygote','--single-process','--disable-gpu','--disable-software-rasterizer']});const page=await browser.newPage({viewport:{width:1586,height:992}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
 let projects=[{id:'00000000-0000-4000-8000-000000000001',name:'خدمة العملاء',status:'draft',active_version:null},{id:'00000000-0000-4000-8000-000000000002',name:'ردود تلقائية',status:'stopped',active_version:1},{id:'00000000-0000-4000-8000-000000000003',name:'قائمة الأوامر',status:'running',active_version:1}];let language='ar',savedName='',created=false;
 await page.route('**/api/v1/**',async route=>{const request=route.request(),url=new URL(request.url()),path=url.pathname,body=request.postDataJSON();let result={};
 if(path.endsWith('/auth/oidc/callback'))result={access_token:'qa-session-not-real'};
