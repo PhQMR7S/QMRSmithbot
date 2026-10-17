@@ -2,10 +2,11 @@
 
 ## Current verified boundary
 
-The Vercel preview confirms packaging and HTTP application discovery; it does **not** establish
-production readiness, database migrations, OAuth sign-in, Telegram webhook delivery, or
-continuous processing. Keep the factory webhook disabled and do not register bot webhooks
-until an actual execution consumer has been tested against a persistent database.
+The factory is connected through an authenticated public ingress and a protected control plane.
+Static text bots have a bounded request-time consumer; see INLINE_TEXT_RUNTIME.md for its
+supported graph, setup, delivery semantics and validation limits. Advanced queue workflows
+remain disabled until their persistent worker/action consumer passes its release gates.
+The checklist below covers the broader platform, including features beyond text templates.
 
 ## Minimum topology
 
@@ -45,8 +46,7 @@ until an actual execution consumer has been tested against a persistent database
 ## Avoid misleading healthy states
 
 HTTP GET /health only establishes that a FastAPI function responded. Never treat it as
-a worker, storage, or Telegram delivery readiness check. Keep factory activation off
-until the infrastructure gates are met.
+a worker, storage, or Telegram delivery readiness check. Keep each execution transport disabled until its own storage, authentication and consumer checks pass.
 
 ## Free plan constraints
 
