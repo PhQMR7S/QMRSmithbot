@@ -2,6 +2,7 @@
 from uuid import uuid4
 
 import pytest
+from typing import ClassVar
 
 from qmrsmithbot.telegram.queue import ClaimedTelegramUpdate
 from qmrsmithbot.telegram.worker import TelegramRuntimeWorker
@@ -19,7 +20,7 @@ class FakeSession:
 
 
 class FakeQueue:
-    failures = []
+    failures: ClassVar[list[dict]] = []
     item = None
 
     def __init__(self, session):
