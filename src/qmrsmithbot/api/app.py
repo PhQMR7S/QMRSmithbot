@@ -2,6 +2,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from qmrsmithbot.api.auth import router as auth_router
 from qmrsmithbot.api.dashboard import router as dashboard_router
@@ -19,7 +21,7 @@ from qmrsmithbot.auth.service import (
     TenantAdministrationError,
     TenantSelectionRequired,
 )
-from qmrsmithbot.db.session import close_database
+from qmrsmithbot.db.session import SessionFactory, close_database
 from qmrsmithbot.projects.service import (
     InvalidWorkflowError,
     ProjectNotFoundError,
@@ -136,6 +138,17 @@ async def telegram_webhook_error(_: Request, exc: TelegramWebhookError) -> JSONR
 @app.get("/", include_in_schema=False)
 async def homepage() -> RedirectResponse:
     return RedirectResponse(url="/dashboard", status_code=307)
+
+
+@app.get("/ready", include_in_schema=False)
+async def ready() -> JSONResponse:
+    """Readiness requires a working database; never leak connection details."""
+    try:
+        async with SessionFactory() as session:
+            await session.execute(text("SELECT 1"))
+    except (SQLAlchemyError, OSError, TimeoutError):
+        return JSONResponse(status_code=503, content={"status": "unavailable"})
+    return JSONResponse(status_code=200, content={"status": "ready"})
 
 
 @app.get("/health")
