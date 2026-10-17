@@ -146,6 +146,10 @@ async def ready() -> JSONResponse:
     try:
         async with SessionFactory() as session:
             await session.execute(text("SELECT 1"))
+            # A database connection alone is not enough to serve the application.
+            applied = await session.execute(text("SELECT version_num FROM alembic_version"))
+            if applied.scalar_one_or_none() is None:
+                return JSONResponse(status_code=503, content={"status": "unavailable"})
     except (SQLAlchemyError, OSError, TimeoutError):
         return JSONResponse(status_code=503, content={"status": "unavailable"})
     return JSONResponse(status_code=200, content={"status": "ready"})
