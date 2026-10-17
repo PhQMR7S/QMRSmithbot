@@ -1,5 +1,7 @@
 """Database-backed readiness must not claim success without a working database."""
 
+import importlib
+
 import httpx
 import pytest
 from sqlalchemy.exc import OperationalError
@@ -24,8 +26,10 @@ class FakeSession:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("fail", "expected"), [(False, 200), (True, 503)])
-async def test_readiness_verifies_database_and_does_not_expose_errors(monkeypatch, fail, expected):
-    from qmrsmithbot.api import app as module
+async def test_readiness_verifies_database_and_does_not_expose_errors(
+    monkeypatch, fail, expected
+):
+    module = importlib.import_module("qmrsmithbot.api.app")
 
     monkeypatch.setattr(module, "SessionFactory", lambda: FakeSession(fail))
     async with httpx.AsyncClient(
