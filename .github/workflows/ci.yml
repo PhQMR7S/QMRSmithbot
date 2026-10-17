@@ -10,6 +10,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  postgres-migrations:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: qmrsmith
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: qmrsmith
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://qmrsmith:ci-only-password@localhost:5432/qmrsmith
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install runtime
+        run: pip install .
+      - name: Apply all migrations on PostgreSQL and verify repeatability
+        run: |
+          alembic upgrade head
+          alembic upgrade head
+          alembic current
+
   quality:
     runs-on: ubuntu-latest
     steps:
