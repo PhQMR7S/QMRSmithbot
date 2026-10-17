@@ -17,10 +17,6 @@ async def test_webhook_activation_requires_verified_runtime(monkeypatch):
     tenant_id = uuid4()
     project_id = uuid4()
     session = AsyncMock()
-    session.scalar.side_effect = [
-        object(),  # Project (initial tenant-scoped lookup)
-        object(),  # Credential (project-scoped lookup)
-    ]
     # The project must contain a Telegram ID to pass provisioning checks.
     class Project:
         telegram_bot_id = 42
