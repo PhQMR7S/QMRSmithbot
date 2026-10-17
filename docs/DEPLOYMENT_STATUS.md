@@ -1,33 +1,58 @@
 # Preview deployment status — 2026-10-17
 
-Project: qmrsmithbot (Vercel), repository PhQMR7S/QMRSmithbot.
-Development: feat/account-language-preferences / PR #23. Main remains unmerged.
+Repository: PhQMR7S/QMRSmithbot. Branch: feat/account-language-preferences / PR #23.
+Main is not merged. No Telegram webhook has been activated.
 
-## Database
+## Database and application role
 
-Created database qmrsmithbot on the existing Neon project's main branch. This is a separate database sharing compute and project quotas with the existing resource; it is not a separate Neon project. Existing neondb application tables were not changed.
+The qmrsmithbot database uses the existing Neon project and shares its compute/quotas.
+It has separate application tables from neondb. Migrations are applied through 20261017_02.
+The application connects as qmrsmith_app, with an independently generated password and no
+superuser, create-role, create-database, replication or neon_superuser membership.
+It has application-table DML, sequence use, and read-only SELECT on alembic_version.
+Credentials are stored only in encrypted Vercel Preview environment variables.
 
-Applied the complete migration chain through 20261017_01 in one transaction.
-A real PostgreSQL run exposed historical revision IDs longer than Alembic's default VARCHAR(32). The initial migration now widens the version column to 128 characters before applying the chain. The failed attempt rolled back completely.
+Committed insert/read/delete checks succeeded as the application role. Existing neondb tables
+were not changed. Migration execution revealed historical revision identifiers too long for
+Alembic's default 32-character field; the initial migration now widens the version field.
 
-Created qmrsmith_app with an independently generated password, without superuser, create-role, create-database, replication, or neon_superuser membership. Granted database CONNECT, schema USAGE, application-table SELECT/INSERT/UPDATE/DELETE and sequence USAGE/SELECT. No grants to the migration-version table. Public database CONNECT/TEMP privileges were revoked on qmrsmithbot only. Future application tables require explicit grants.
-The pre-existing qmrsmith_owner role owns the database and is not used by the application; Neon automatically gives API-created roles elevated memberships.
+## Reliability changes
 
-Verified committed insert and read across separate calls as qmrsmith_app, then removed the exact synthetic verification record. Verified the role has no elevated membership.
-Stored the application DATABASE_URL as an encrypted Preview environment variable in Vercel. No credentials are stored in repository files.
+Factory update markers now include the configured factory bot ID. Previously the processor
+omitted a required component of the primary key, which would fail against real PostgreSQL.
+The PostgreSQL integration job verifies concurrent duplicate delivery, language persistence,
+internal/Telegram identity separation and one-time draft creation with real constraints.
 
-## Deployment and checks
+An optional PostgreSQL authentication limiter removes the requirement for a separate Redis
+service for this control. It uses atomic fixed windows, database time, hashed keys, bounded
+expiry cleanup and failure-closed behavior. Redis remains available as a separate backend.
+Preview uses RATE_LIMIT_ENABLED=true and RATE_LIMIT_BACKEND=postgresql.
 
-Redeployed commit 08e601e9e7af8de68a3b125f0acbbd3abb8f9451:
-https://qmrsmithbot-dro1yqb8e-phqmr7s.vercel.app/dashboard
+The /ready endpoint checks application tables and the expected schema revision with a
+five-second query deadline. It returns generic 503 responses without connection details,
+and no-store headers. /health remains a liveness check. The root path redirects to /dashboard.
 
-GET /health returned HTTP 200 on this deployment. This endpoint does not query the database, so it is not proof of database connectivity from the deployed process.
-A connector fetch of /api/v1/projects was blocked by deployment authentication; this result does not establish the application's authentication response.
+## Verification
 
-211 local tests passed; Ruff and compile checks passed. Added a PostgreSQL 18 CI job applying all migrations twice to cover actual database execution. This new remote CI job has not yet been observed running.
+Preview commit 9a5ff30bda05beb2f3d671e0b002838f7d6a3f11:
+https://qmrsmithbot-9dvlymasj-phqmr7s.vercel.app/dashboard
 
-## Remaining work
+Verified /ready returns 200 from Vercel using the restricted application role.
+An OIDC-start request reached the configured PostgreSQL rate limiter and persisted a counter;
+the request then returned the expected provider-unavailable response because OIDC is not configured.
+This is not a successful login.
 
-Preview continues to use staging settings with development-session bootstrap and the Telegram factory disabled. Vercel deployment protection remains enabled.
-Factory credentials, production identity provider, production rate limiting, generated-bot durable queue consumers and advanced templates remain incomplete. No Telegram webhook was activated.
-Next: configure identity and production-compatible rate limiting, verify database access from the deployment, then finish and validate durable message consumers and factory secrets before activation.
+PostgreSQL 18 CI passed migrations twice plus three integration scenarios, including 20
+concurrent rate-limit checks and expired-window reset. The runtime-only packaging job passed.
+The quality job exposed the expected-schema test needing the new security_rate_limits table;
+the follow-up commit corrects that expected set. Record the final CI run result before release.
+
+## Remaining release requirements
+
+OIDC identity provider and account linking, factory credentials, public reachable webhook
+origin, durable generated-bot consumers and advanced templates remain incomplete.
+Factory and generated-bot activation gates remain disabled, deployment protection stays enabled,
+and no paid plan was activated. A ready HTTP database probe does not establish Telegram delivery.
+
+Before public release, verify production identity, durable inbox and action-ledger consumption,
+retry recovery, actual Telegram delivery and the complete create/publish/bind/stop/resume flow.
