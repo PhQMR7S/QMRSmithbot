@@ -6,6 +6,8 @@ import socket
 from typing import Final
 from uuid import uuid4
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from qmrsmithbot.config import settings
 from qmrsmithbot.db.session import SessionFactory
 from qmrsmithbot.telegram.execution import (
@@ -91,7 +93,16 @@ class TelegramRuntimeWorker:
 
     async def run_forever(self) -> None:
         while not self._stop.is_set():
-            did_work = await self.run_once()
+            try:
+                did_work = await self.run_once()
+            except (SQLAlchemyError, OSError, ConnectionError):
+                # Infrastructure failures must not permanently kill the queue consumer.
+                # Sleep rather than busy-looping when the database is unavailable.
+                try:
+                    await asyncio.wait_for(self._stop.wait(), timeout=5.0)
+                except TimeoutError:
+                    pass
+                continue
             if not did_work:
                 try:
                     await asyncio.wait_for(
