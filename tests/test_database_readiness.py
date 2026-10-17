@@ -11,7 +11,7 @@ from qmrsmithbot.api.app import app
 
 class FakeResult:
     def scalar_one_or_none(self):
-        return "0007"
+        return "20261017_01"
 
 
 class FakeSession:
