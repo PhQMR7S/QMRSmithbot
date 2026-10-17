@@ -63,8 +63,8 @@ async def factory_webhook(
         raise HTTPException(status_code=400, detail='Invalid Telegram update') from exc
     if update.update_id < 0:
         raise HTTPException(status_code=400, detail='Invalid Telegram update ID')
-    result = await processor.process(update)
-    await delete_sensitive_message(update)
     if update.callback_query is not None:
         await acknowledge_callback(update.callback_query.id)
+    result = await processor.process(update)
+    await delete_sensitive_message(update)
     return result if result is not None else Response(status_code=204)

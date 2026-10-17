@@ -338,3 +338,63 @@ async def test_text_bot_full_lifecycle(factory_database, monkeypatch):
     fake.set_webhook.side_effect = TimeoutError()
     assert 'تعذر' in (await launch())['text']
     assert (await reply(update(text='/start')))['text'] == 'Second greeting'
+
+
+@pytest.mark.asyncio
+async def test_modern_editor_preferences_and_stale_buttons(factory_database):
+    from uuid import UUID
+
+    from qmrsmithbot.db.models import WorkflowVersionRecord
+    from qmrsmithbot.telegram.inline_runtime import compile_text_program
+
+    processor, sessions, update, _, _ = factory_database
+    await processor.process(update(callback='template:welcome'))
+    await processor.process(update(text='Modern bot'))
+    review = await processor.process(update(text='Hello'))
+    created = await processor.process(update(callback=review['reply_markup']['inline_keyboard'][0][0]['callback_data']))
+    project_id = UUID(created['reply_markup']['inline_keyboard'][0][0]['callback_data'].split(':')[1])
+    await processor.process(update(callback='ui:list'))
+    await processor.process(update(text='/start'))
+    library = await processor.process(update(callback='projects:0'))
+    assert 'اختر بوتًا' in library['text']
+    callback = update(callback='appearance').model_dump(mode='json', exclude_none=True)
+    callback['callback_query']['message']['from'] = {'id': factory_database[4], 'is_bot': True, 'first_name': 'Factory'}
+    assert (await processor.process(Update.model_validate(callback)))['method'] == 'editMessageText'
+    await processor.process(update(callback=f'ra:{project_id}:m'))
+    await processor.process(update(text='السعر'))
+    await processor.process(update(text='10 dollars'))
+    await processor.process(update(callback=f'ra:{project_id}:c'))
+    await processor.process(update(text='/help'))  # Reserved navigation; must not create a reply.
+    await processor.process(update(text='support'))
+    content = await processor.process(update(text='Contact admin'))
+    entries = [b['callback_data'] for row in content['reply_markup']['inline_keyboard'] for b in row if b.get('callback_data', '').startswith('ri:')]
+    assert len(entries) == 2
+    old_button = entries[0]
+    item = await processor.process(update(callback=old_button))
+    edit = item['reply_markup']['inline_keyboard'][0][0]['callback_data']
+    await processor.process(update(callback=edit))
+    await processor.process(update(text='Updated price'))
+    stale = await processor.process(update(callback=old_button))
+    assert 'تغيّر' in stale['text']
+    content = await processor.process(update(callback=f'content:{project_id}'))
+    button = next(b['callback_data'] for row in content['reply_markup']['inline_keyboard'] for b in row if b.get('callback_data', '').startswith('ri:'))
+    item = await processor.process(update(callback=button))
+    delete = item['reply_markup']['inline_keyboard'][0][1]['callback_data']
+    confirm = await processor.process(update(callback=delete))
+    confirmation = confirm['reply_markup']['inline_keyboard'][0][0]['callback_data']
+    await processor.process(update(callback=confirmation))
+    await processor.process(update(callback=confirmation))  # Single-use deletion.
+    async with sessions() as session:
+        latest = await session.scalar(select(WorkflowVersionRecord).where(WorkflowVersionRecord.project_id == project_id).order_by(WorkflowVersionRecord.version.desc()).limit(1))
+        program = compile_text_program(latest.definition)
+        assert program.messages == {} and program.commands == {'start': 'Hello', 'support': 'Contact admin'}
+    await processor.process(update(callback=f'simulate:{project_id}'))
+    assert 'Contact admin' in (await processor.process(update(text='/support')))['text']
+    await processor.process(update(text='/cancel'))
+    # A second identity cannot read or mutate the first identity's content.
+    other = update(callback=f'ra:{project_id}:m').model_dump(mode='json', exclude_none=True)
+    actor = other['callback_query']['from']
+    actor['id'] += 123456
+    other['callback_query']['message']['chat']['id'] = actor['id']
+    result = await processor.process(Update.model_validate(other))
+    assert 'غير متاح' in result['text']

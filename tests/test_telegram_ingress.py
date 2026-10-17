@@ -85,3 +85,24 @@ async def test_child_ingress_isolates_secrets_and_upstream_paths(ingress):
     assert len(seen) == 1
     assert seen[0][0] == 'https://private-factory.vercel.app/api/v1/telegram/inline/' + str(project_id)
     assert seen[0][1]['headers']['X-Telegram-Bot-Api-Secret-Token'] == secret
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('method', ['sendMessage', 'editMessageText', 'sendRichMessage'])
+async def test_ingress_preserves_supported_native_panel_commands(ingress, method):
+    payload = {'method': method, 'chat_id': 42, 'reply_markup': {'inline_keyboard': []}}
+    if method == 'sendRichMessage':
+        payload['rich_message'] = {'html': '<h2>Panel</h2>'}
+    else:
+        payload['text'] = 'Panel'
+    if method == 'editMessageText':
+        payload['message_id'] = 17
+    class Client:
+        async def post(self, *args, **kwargs):
+            return httpx.Response(200, json=payload)
+    async def override():
+        yield Client()
+    ingress.app.dependency_overrides[ingress.upstream_client] = override
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=ingress.app), base_url='https://test') as client:
+        result = await client.post('/webhook', json={'update_id': 7}, headers={'X-Telegram-Bot-Api-Secret-Token': 'S'*40})
+        assert result.status_code == 200 and result.json() == payload

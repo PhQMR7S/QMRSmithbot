@@ -64,7 +64,8 @@ class SQLFactoryStore:
         if record is None:
             record = FactoryConversationRecord(user_id=self.user.id)
             self.session.add(record)
-        record.step, record.data = state.step, state.data
+        preferences = (record.data or {}).get('_ui', {})
+        record.step, record.data = state.step, {**state.data, '_ui': state.data.get('_ui', preferences)}
         await self.session.flush()
 
     async def permission(self, permission):

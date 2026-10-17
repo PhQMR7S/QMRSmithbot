@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Production-grade Telegram Bot Builder platform"
 requires-python = ">=3.12"
 dependencies = [
-  "aiogram>=3.22,<4",
+  "aiogram>=3.31,<4",
   "aiohttp>=3.12,<4",
   "httpx>=0.28,<1",
   "fastapi>=0.116,<1",

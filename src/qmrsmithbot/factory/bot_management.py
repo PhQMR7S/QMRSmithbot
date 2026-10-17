@@ -16,6 +16,7 @@ from qmrsmithbot.config import settings
 from qmrsmithbot.db.factory_models import TelegramInlineBotRecord
 from qmrsmithbot.db.models import BotCredentialRecord, BotProjectRecord, WorkflowVersionRecord
 from qmrsmithbot.factory.menu import MenuState
+from qmrsmithbot.factory.reply_editor import ReplyEditor
 from qmrsmithbot.telegram.inline_runtime import (
     InlineBotError,
     child_webhook_secret,
@@ -165,6 +166,9 @@ class BotManagement:
             return [button('↩ لوحة البوت', '↩ Bot panel', 'project:' + str(project_id))]
         state = await self.store.state()
         try:
+            edited = await ReplyEditor(self, menu).handle(text=text, callback=callback)
+            if edited is not None:
+                return edited
             if callback in ('stats', 'admin'):
                 if callback == 'admin' and not menu.admin:
                     return menu.response(menu.text('missing'))
@@ -178,12 +182,12 @@ class BotManagement:
                 body = '\n'.join(f'{menu.text(key)}: {counts.get(key, 0)}'
                                  for key in ('running', 'stopped', 'draft', 'error'))
                 return menu.response(title + '\n\n' + body)
-            if callback == 'help' or text == '/help':
+            if callback == 'help' or (text == '/help' and state.step != 'bot_test'):
                 return menu.response(tr('🧭 خطوات إنشاء بوتك\n\n1. اختر قالبًا وأدخل المحتوى.\n2. افتح لوحة المشروع واربط توكن البوت من @BotFather.\n3. عاين المحتوى ثم اضغط «نشر وتشغيل».\n\nيمكنك تعديل الترحيب والردود وإيقاف البوت من لوحته. التوكن يُشفّر ولا يظهر في اللوحة.',
                     '🧭 Create your bot\n\n1. Choose a template and add content.\n2. Open its panel and connect the bot token from @BotFather.\n3. Preview, then Publish & run.\n\nEdit content or stop your bot from its panel. Tokens are encrypted and never displayed.'))
             if callback and ':' in callback:
                 action, raw = callback.split(':', 1)
-                if action in ('project', 'bind', 'preview', 'rename', 'welcome', 'rules', 'rulesmsg', 'rulescmd', 'launchask'):
+                if action in ('project', 'bind', 'preview', 'rename', 'welcome', 'rules', 'rulesmsg', 'rulescmd', 'launchask', 'connection', 'botsettings', 'simulate'):
                     project_id = UUID(raw)
                     project = await self.project(project_id)
                     if action == 'project':
@@ -192,24 +196,38 @@ class BotManagement:
                         record = await self.session.get(TelegramInlineBotRecord, project_id)
                         connected = '@' + project.telegram_username if project.telegram_username else tr('غير مربوط', 'Not connected')
                         status = menu.text(project.status)
-                        rows = [[button('🔗 ربط / تحديث التوكن', '🔗 Connect / update token', 'bind:' + raw),
-                                 button('👁 معاينة', '👁 Preview', 'preview:' + raw)],
-                                [button('💬 رسالة البداية', '💬 Welcome message', 'welcome:' + raw),
-                                 button('📝 الردود والأوامر', '📝 Replies & commands', 'rules:' + raw)],
-                                [button('✏️ الاسم', '✏️ Rename', 'rename:' + raw),
-                                 button('🚀 نشر وتشغيل', '🚀 Publish & run', 'launchask:' + raw)]]
+                        pending = version.version != project.active_version
+                        rows = [[button('📝 استوديو المحتوى', '📝 Content studio', 'content:' + raw)],
+                                [button('👁 معاينة الزائر', '👁 Visitor preview', 'preview:' + raw),
+                                 button('🚀 النشر', '🚀 Publish', 'launchask:' + raw)],
+                                [button('🔐 الاتصال والتوكن', '🔐 Connection & token', 'connection:' + raw),
+                                 button('⚙️ الإعدادات', '⚙️ Settings', 'botsettings:' + raw)]]
                         if record is not None and record.enabled and project.active_version:
                             op = 'stop' if project.status == 'running' else 'resume'
                             rows.append([menu.button(op, op + 'ask:' + raw)])
                         rows.append([menu.button('back', 'home')])
-                        return menu.response(f'🤖 {project.name}\n{connected}\n{status}\n'
+                        return menu.response(f'🤖 {project.name}\n{connected} · {status}\n\n' + tr('🟠 لديك تغييرات غير منشورة\n' if pending else '🟢 آخر التعديلات منشورة\n', '🟠 Unpublished changes\n' if pending else '🟢 Latest changes published\n')
                             + tr(f'الإصدار المنشور: {project.active_version or "—"}\nآخر مسودة: {version.version}',
                                  f'Published version: {project.active_version or "—"}\nLatest draft: {version.version}'), rows)
+                    if action == 'connection':
+                        connected = '@' + project.telegram_username if project.telegram_username else tr('لم يتم الربط بعد', 'Not connected yet')
+                        rows = [[button('🔗 ربط أو تحديث التوكن', '🔗 Connect or update token', 'bind:' + raw)]]
+                        if project.telegram_username:
+                            rows.append([{'text': tr('↗ فتح البوت', '↗ Open bot'), 'url': 'https://t.me/' + project.telegram_username}])
+                        rows.append(back(project_id))
+                        return menu.response(tr('🔐 اتصال البوت\n\n', '🔐 Bot connection\n\n') + connected + tr('\n\nالتوكن مشفّر ولا يُعرض هنا. تحديثه يقبل نفس هوية البوت فقط.', '\n\nThe token is encrypted and never shown here. Updates must belong to the same bot.'), rows)
+                    if action == 'botsettings':
+                        return menu.response(tr('⚙️ إعدادات البوت\n', '⚙️ Bot settings\n')+project.name,
+                            [[button('✏️ تغيير اسم المشروع', '✏️ Rename project', 'rename:' + raw)], back(project_id)])
+                    if action == 'simulate':
+                        await menu.save_state(MenuState('bot_test', {'project_id': raw}))
+                        return menu.response(tr('🧪 جرّب محتواك\n\nأرسل كلمة أو أمرًا مثل /help لاختبار الرد من آخر مسودة. للخروج اضغط الرجوع أو /cancel.',
+                            '🧪 Try your content\n\nSend a phrase or a command such as /help to test the latest draft. Use Back or /cancel to leave.'), [back(project_id)])
                     if action == 'preview':
                         program = compile_text_program((await self.latest(project_id)).definition)
                         return menu.response(tr('👁 معاينة رسالة البداية\n\n', '👁 Welcome preview\n\n')
                             + program.commands['start'] + tr(f'\n\nالردود: {len(program.messages)} | الأوامر: {len(program.commands)-1}',
-                                f'\n\nReplies: {len(program.messages)} | Commands: {len(program.commands)-1}'), [back(project_id)])
+                                f'\n\nReplies: {len(program.messages)} | Commands: {len(program.commands)-1}'), [[button('🧪 تجربة الردود', '🧪 Try responses', 'simulate:' + raw)], back(project_id)])
                     if action == 'rules':
                         return menu.response(tr('اختر نوع القائمة الجديدة. الحفظ يستبدل الردود/الأوامر السابقة ويُبقي رسالة البداية.',
                             'Choose the replacement list type. Saving replaces existing replies/commands and keeps the welcome message.'),
@@ -240,6 +258,14 @@ class BotManagement:
                     await self.store.save_state(MenuState('idle', {}))
                     return menu.response(tr('✅ نُشر البوت وتم التحقق من ربطه. افتحه وأرسل /start.',
                         '✅ Published and webhook verified. Open your bot and send /start.'), [back(project_id)])
+            if text and state.step == 'bot_test' and text not in ('/start', '/cancel', '/language'):
+                project_id = UUID(state.data['project_id'])
+                await self.project(project_id)
+                program = compile_text_program((await self.latest(project_id)).definition)
+                value = program.commands.get(text.split()[0][1:]) if text.startswith('/') else program.messages.get(text)
+                if re.search(r'\b[0-9]{5,16}:[A-Za-z0-9_-]{20,}\b', text):
+                    raise InlineBotError('token')
+                return menu.response(tr('👁 نتيجة التجربة\n\n', '👁 Test result\n\n') + (value if value is not None else tr('ماكو رد مطابق لهالرسالة. أضفه من استوديو المحتوى.', 'No matching reply. Add one in the content studio.')), [back(project_id)])
             if text and not text.startswith('/') and state.step in ('bot_token', 'bot_name', 'bot_welcome', 'bot_rules'):
                 project_id = UUID(state.data['project_id'])
                 if state.step == 'bot_token':
@@ -270,7 +296,9 @@ class BotManagement:
                 await self.store.save_state(MenuState('idle', {}))
                 return menu.response(result, [back(project_id)])
         except ValueError as exc:
-            errors = {'token': tr('التوكن غير صالح أو لم يقبله تيليجرام. تأكد منه وحاول مجددًا.', 'Invalid token or Telegram rejected it. Check it and try again.'),
+            errors = {'stale': tr('المحتوى تغيّر منذ فتح هذا الزر. افتح لوحة البوت ومحرر المحتوى مجددًا حتى تعدّل آخر مسودة.', 'Content changed since this button was opened. Reopen the bot panel and content studio to edit the latest draft.'),
+                      'duplicate': tr('هذا الرد أو الأمر موجود. اختَره من محرر المحتوى لتعديله.', 'This trigger already exists. Select it in the content studio to edit it.'),
+                      'token': tr('التوكن غير صالح أو لم يقبله تيليجرام. تأكد منه وحاول مجددًا.', 'Invalid token or Telegram rejected it. Check it and try again.'),
                       'factory': tr('هذا توكن المصنع. استخدم توكن بوت آخر.', 'This is the factory token. Use a different bot.'),
                       'assigned': tr('هذا البوت مربوط بمشروع آخر.', 'This bot is connected to another project.'),
                       'different': tr('المشروع مربوط ببوت آخر. أنشئ مشروعًا جديدًا للبوت الجديد.', 'This project already has a different bot. Create a new project for the new bot.'),

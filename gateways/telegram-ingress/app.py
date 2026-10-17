@@ -83,7 +83,7 @@ async def forward(request, client, path, secret):
             return Response(status_code=204, headers=HEADERS)
         if result.status_code == 200 and len(result.content) <= 65536:
             response = result.json()
-            if isinstance(response, dict) and response.get('method') == 'sendMessage':
+            if isinstance(response, dict) and response.get('method') in ('sendMessage', 'editMessageText', 'sendRichMessage'):
                 return Response(content=result.content, media_type='application/json', headers=HEADERS)
     except (httpx.HTTPError, ValueError):
         pass

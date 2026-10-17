@@ -69,7 +69,10 @@ async def test_full_wizard_creates_once(template, rules):
     await menu.handle(text='My bot')
     response = await menu.handle(text='Welcome')
     if rules:
-        response = await menu.handle(text=rules)
+        key, reply = rules.split('|', 1)
+        await menu.handle(text=key.strip())
+        await menu.handle(text=reply.strip())
+        response = await menu.handle(callback='wizarddone')
     confirmation = callback_data(response)
     assert confirmation.startswith('confirm:')
     assert not store.created
@@ -102,11 +105,16 @@ async def test_rules_validation_and_secret_rejection():
     assert store.conversation.step == 'name'
     await menu.handle(text='FAQ')
     await menu.handle(text='Hello')
-    await menu.handle(text='invalid')
-    assert store.conversation.step == 'rules'
-    await menu.handle(text='a | A\na | B')
-    assert store.conversation.step == 'rules'
+    await menu.handle(text='word')
+    assert store.conversation.step == 'wizard_reply'
+    await menu.handle(text='123456:' + 'a'*35)
+    assert store.conversation.step == 'wizard_reply'
+    await menu.handle(text='Answer')
+    await menu.handle(callback='wizardadd')
+    await menu.handle(text='word')
+    assert store.conversation.step == 'wizard_key'
     assert not store.created
+
 
 
 async def test_pagination_and_unknown_project():
@@ -170,3 +178,21 @@ async def test_duplicate_update_never_runs_menu(monkeypatch):
         'first_name': 'Test'}, 'text': '/start'}})
     assert await FactoryProcessor(sessions=lambda: context).process(update) is None
     store.assert_not_awaited()
+
+
+async def test_appearance_survives_navigation_and_wizard():
+    store = Store()
+    menu = FactoryMenu(store, telegram_id=42)
+    await menu.handle(callback='ui:list')
+    await menu.handle(callback='ui:rich')
+    await menu.handle(text='/start')
+    await menu.handle(callback='template:welcome')
+    await menu.handle(text='Name')
+    await menu.handle(callback='wizarddefault')
+    assert store.conversation.step == 'confirm'
+    assert store.conversation.data['_ui'] == {'layout': 'list', 'rich': True}
+    await menu.handle(callback='wizard:name')
+    review = await menu.handle(text='New name')
+    assert 'New name' in review['text'] and store.conversation.step == 'confirm'
+    await menu.handle(callback='ui:plain')
+    assert store.conversation.data['_ui']['rich'] is False

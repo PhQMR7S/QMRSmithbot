@@ -8,6 +8,7 @@ from qmrsmithbot.db.factory_models import FactoryUpdateRecord
 from qmrsmithbot.db.session import SessionFactory
 from qmrsmithbot.factory.bot_management import BotManagement
 from qmrsmithbot.factory.menu import FactoryMenu
+from qmrsmithbot.factory.presentation import telegram_response
 from qmrsmithbot.factory.store import factory_store
 from qmrsmithbot.factory.web_login import handle_web_login
 from qmrsmithbot.projects.service import ProjectStateError
@@ -58,5 +59,7 @@ class FactoryProcessor:
                         callback=update.callback_query.data if update.callback_query else None)
             except (AuthorizationDenied, ProjectStateError):
                 response = menu.response(menu.text('invalid'))
+            ui = (await store.state()).data.get('_ui', {})
             # The transaction is committed before Telegram gets its response command.
-        return {'method': 'sendMessage', 'chat_id': actor.id, **response}
+        return telegram_response(response, actor_id=actor.id, callback=update.callback_query,
+                                 bot_id=bot_id, rich=ui.get('rich', False), language=menu.lang)
