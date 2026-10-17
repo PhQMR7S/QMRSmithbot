@@ -18,6 +18,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # Historical revision identifiers exceed Alembic's default 32 characters.
+    op.alter_column("alembic_version", "version_num", type_=sa.String(length=128))
     op.create_table(
         "users",
         sa.Column("id", sa.BigInteger(), nullable=False),
