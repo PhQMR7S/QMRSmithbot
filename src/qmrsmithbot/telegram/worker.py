@@ -63,6 +63,21 @@ class TelegramRuntimeWorker:
                     error=str(exc) or exc.__class__.__name__,
                     retry_delay_seconds=delay,
                 )
+        except Exception as exc:
+            # Unexpected handler errors must not terminate the consumer loop or
+            # strand a claim until lease expiry. Do not persist arbitrary exception
+            # messages: they may contain user input or credentials.
+            delay = min(
+                MAX_RETRY_DELAY_SECONDS,
+                max(1, 2 ** min(item.attempts - 1, 8)) + random.randint(0, 3),
+            )
+            async with SessionFactory() as session, session.begin():
+                await TelegramUpdateQueue(session).fail(
+                    update_id=item.id,
+                    claim_token=item.claim_token,
+                    error=f"unexpected handler error: {type(exc).__name__}",
+                    retry_delay_seconds=delay,
+                )
         else:
             async with SessionFactory() as session, session.begin():
                 # A lease may legitimately expire while a slow handler is finishing.
