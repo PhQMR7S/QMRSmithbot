@@ -46,3 +46,8 @@ def test_production_accepts_explicit_security_controls() -> None:
     assert settings.rate_limit_requests == 10
     assert settings.rate_limit_window_seconds == 60
     assert settings.telegram_webhook_base_url == "https://app.example.com"
+
+
+def test_generated_bot_runtime_activation_is_off_by_default() -> None:
+    settings = Settings(_env_file=None)
+    assert settings.telegram_runtime_consumer_verified is False
