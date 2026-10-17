@@ -357,7 +357,7 @@ async def test_modern_editor_preferences_and_stale_buttons(factory_database):
     await processor.process(update(text='/start'))
     library = await processor.process(update(callback='projects:0'))
     assert 'اختر بوتًا' in library['text']
-    callback = update(callback='appearance').model_dump(mode='json', exclude_none=True)
+    callback = update(callback='appearance').model_dump(mode='json', exclude_none=True, by_alias=True)
     callback['callback_query']['message']['from'] = {'id': factory_database[4], 'is_bot': True, 'first_name': 'Factory'}
     assert (await processor.process(Update.model_validate(callback)))['method'] == 'editMessageText'
     await processor.process(update(callback=f'ra:{project_id}:m'))
@@ -392,9 +392,17 @@ async def test_modern_editor_preferences_and_stale_buttons(factory_database):
     assert 'Contact admin' in (await processor.process(update(text='/support')))['text']
     await processor.process(update(text='/cancel'))
     # A second identity cannot read or mutate the first identity's content.
-    other = update(callback=f'ra:{project_id}:m').model_dump(mode='json', exclude_none=True)
+    other = update(callback=f'ra:{project_id}:m').model_dump(mode='json', exclude_none=True, by_alias=True)
     actor = other['callback_query']['from']
     actor['id'] += 123456
     other['callback_query']['message']['chat']['id'] = actor['id']
-    result = await processor.process(Update.model_validate(other))
-    assert 'غير متاح' in result['text']
+    try:
+        result = await processor.process(Update.model_validate(other))
+        assert 'غير متاح' in result['text']
+    finally:
+        async with sessions() as session, session.begin():
+            other_id = await session.scalar(select(IdentityRecord.user_id).where(
+                IdentityRecord.provider == 'telegram', IdentityRecord.subject == str(actor['id'])))
+            if other_id:
+                await session.execute(delete(AuditEvent).where(AuditEvent.actor_user_id == other_id))
+                await session.execute(delete(User).where(User.id == other_id))
