@@ -41,3 +41,6 @@ known-first-party = ["qmrsmithbot"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[tool.setuptools.package-data]
+qmrsmithbot = ["dashboard/*.html", "dashboard/*.js", "dashboard/*.css"]
