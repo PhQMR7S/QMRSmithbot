@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from qmrsmithbot.api.auth import router as auth_router
+from qmrsmithbot.api.preferences import router as preferences_router
 from qmrsmithbot.api.projects import router as projects_router
 from qmrsmithbot.api.telegram import router as telegram_router
 from qmrsmithbot.api.telegram_webhook import router as telegram_webhook_router
@@ -42,6 +43,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="QMRSmithbot", version="0.1.0", lifespan=lifespan)
 app.include_router(auth_router)
+app.include_router(preferences_router)
 app.include_router(projects_router)
 app.include_router(tenants_router)
 app.include_router(telegram_router)
