@@ -23,7 +23,7 @@ One-time draft/action nonces prevent old confirmation buttons from confirming a 
 5. Test private start/language, all three creation wizards, cancellation, duplicate delivery, permission isolation and database failure before public activation.
 
 ## Limits and remaining work
-No live Telegram webhook has been registered or tested by this change. PostgreSQL transaction, lock and migration behavior needs live integration validation. Unit and request tests use fake stores/sessions; they do not establish real delivery reliability.
+The factory webhook was registered on 2026-10-17 through the isolated Telegram ingress. Live HTTP probes verified the secret boundary, Arabic /start response and duplicate suppression; synthetic test records were removed. PostgreSQL CI tests cover real transaction and constraint behavior. A human /start and real chat interactions remain to be observed; these HTTP tests do not establish every Telegram delivery guarantee.
 
 Telegram does not return the result of API calls embedded in a webhook response. If the response is lost after the transaction commits, a retry is deduplicated and the user may need /start; this change does not provide a transactional outbound-delivery guarantee. It prevents duplicate project creation, not every possible lost/duplicate UI message. Add a durable outbox with receipt handling if stronger delivery guarantees are required.
 

@@ -1,59 +1,62 @@
-# Preview deployment status — 2026-10-17
+# Deployment status — 2026-10-17
 
-Repository: PhQMR7S/QMRSmithbot. Branch: feat/account-language-preferences / PR #23.
-Main remains unmerged. No Telegram webhook has been activated and no paid plan was enabled.
+Repository: PhQMR7S/QMRSmithbot. Development remains on feat/account-language-preferences /
+PR #23; main is not merged. No paid plan was activated.
 
-## Database
+## Factory connection is active
 
-Database qmrsmithbot is separate from neondb application tables but shares the existing Neon
-project's compute and quotas. Migrations are applied through 20261017_03.
-The application uses qmrsmith_app with independently generated credentials and no elevated
-Neon/PostgreSQL role membership. It has application-table DML, sequence use and read-only
-SELECT on alembic_version; it cannot change the migration version.
+Verified bot: @Manjerxbot (Telegram bot ID 7017004595), branded QMRSmithbot | مصنع البوتات.
+Telegram accepted the factory webhook and getWebhookInfo confirmed the exact URL, zero pending
+updates, no delivery error, max_connections=1 and allowed_updates=[message, callback_query].
+Arabic/default and English commands plus profile descriptions were configured.
 
-## Implemented and verified
+Public webhook: https://qmrsmithbot-ingress.vercel.app/webhook
+The URL has no credentials or query parameters. Telegram must send its configured
+X-Telegram-Bot-Api-Secret-Token header.
 
-- Factory update deduplication includes the factory bot ID and commits atomically with menu
-  state and draft creation. Real PostgreSQL tests cover concurrent duplicate updates.
-- PostgreSQL authentication rate limiting is enabled in Preview, with atomic shared fixed
-  windows, hashed keys, bounded cleanup and failure-closed behavior. Redis remains optional.
-- /ready verifies application schema, permissions and expected revision; /health is liveness.
-- Optional browser-bound Telegram login now shares the factory's Telegram identity and
-  workspace. It uses a five-minute challenge, a code absent from the deep link, a separate
-  browser secret, a five-attempt lock, explicit bot confirmation, one-time session issuance
-  and server-side cancellation. Raw codes/secrets/session tokens are not persisted.
-- The dashboard discovers enabled providers and provides Telegram start/pending/cancel/finish
-  states. Login and session secrets remain in page memory. Arabic/English and desktop/mobile
-  flows are supported. Neither sign-in provider is enabled until its deployment is configured.
+A direct Vercel-bypass key in Telegram's webhook URL was rejected by automatic approval review.
+That route was not used. A separate minimal ingress service now verifies the Telegram secret
+and forwards to the private factory with the Vercel key only in a server-side HTTP header.
+No bot token or database credentials are in the ingress service.
 
-Verified deployment of commit 66b0bb539ac0c2b9d9eb6f14b13c1c7897348381:
-https://qmrsmithbot-db359beyy-phqmr7s.vercel.app/dashboard
+Ingress project qmrsmithbot-ingress has public production endpoints /health and /webhook only;
+preview deployments retain Vercel Authentication. The main qmrsmithbot project retains its
+original all_except_custom_domains Vercel Authentication, dashboard authentication and tenant
+permissions. The factory is deployed with APP_ENV=production, Telegram sign-in enabled,
+development session bootstrap disabled, PostgreSQL authentication limits enabled and the
+generated-bot consumer activation gate disabled.
 
-Its /ready endpoint returned 200, and /api/v1/auth/methods correctly reported both providers
-disabled. This is not a successful real Telegram sign-in.
+All secrets are stored in encrypted hosting environment variables. No credentials are in Git.
 
-CI run 39026769267 passed quality, runtime-only packaging and all seven PostgreSQL integration
-scenarios. These include concurrency, expiry, cancellation, wrong-browser/other-actor rejection,
-five failed codes and a correct fifth code. 232 local tests passed (seven PostgreSQL cases
-are opt-in locally and passed in CI).
+## Verified live HTTP behavior
 
-Playwright with locally launched Chromium tested desktop 1366x900 and mobile 390x844:
-login code display, pending status, server-cancel request, finish, logout, memory-only secrets,
-no horizontal overflow and no JavaScript errors. The existing management browser flow also
-passed. Browser API responses were mocked; this does not establish Telegram transport.
-Screenshots were visually reviewed. Browser plugin was unavailable. A new browser CI job runs
-both flows and retains QA screenshots as GitHub artifacts.
+- Main /ready returned 200, and auth/methods reported Telegram enabled and OIDC disabled.
+- Wrong factory webhook secret returned 401; a valid ignored update returned 204.
+- Public ingress rejected the wrong secret (401) and forwarded a valid ignored update (204).
+- A synthetic private /start update through the public ingress reached PostgreSQL and returned
+  the correct Arabic sendMessage command with inline menu buttons. Redelivery returned 204.
+  The synthetic account, its workspace and the exact update marker were then deleted.
+  This HTTP probe did not send a Telegram chat message.
+- Real deployment login challenge test: start 200, pending finish 202, wrong browser secret 401,
+  cancellation 204, replay 401. The deep link correctly targeted @Manjerxbot.
 
-## Release requirements still open
+A human must open @Manjerxbot and send /start to verify real chat delivery and interaction.
+No actual user message or human browser → Telegram → browser sign-in has yet been observed.
 
-Configure and verify the factory token, actual bot username, encryption/webhook secrets and a
-public HTTPS origin reachable by Telegram. Vercel preview authentication currently blocks
-Telegram transport; deployment protection has not been disabled.
-Keep AUTH_TELEGRAM_ENABLED=false and TELEGRAM_FACTORY_ENABLED=false until real delivery is
-tested. Production may use configured OIDC or the explicitly configured Telegram provider;
-development bootstrap stays disabled and shared authentication rate limiting stays enabled.
+## Storage and tests
 
-Generated-bot durable inbox and action-ledger consumers, public activation, account linking
-between pre-existing OIDC and Telegram identities, advanced templates and full platform admin
-remain incomplete. Complete and validate the real create/publish/bind/deliver/retry/stop/resume
-flow before describing the factory as production-ready.
+Database qmrsmithbot has separate application tables within the existing Neon project; compute
+and quotas are shared. Migrations are applied through 20261017_03. The application role has
+application-table DML and read-only migration version access, without elevated role membership.
+
+238 local tests passed. CI run 39027749161 passed quality, runtime-only packaging, eight real
+PostgreSQL integration scenarios and desktop/mobile browser tests. Browser API data was mocked;
+PostgreSQL tests and the live HTTP probes above cover different boundaries.
+
+## Still incomplete
+
+The connected factory creates and manages drafts. Generated-bot token binding from its chat
+wizard, durable generated-bot inbox/action consumers, advanced templates, full platform admin
+and linking pre-existing OIDC accounts remain incomplete. Generated-bot webhook activation
+stays gated until its consumer is deployed and verified. A connected factory is not evidence
+that all generated bot types can run.

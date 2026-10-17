@@ -36,7 +36,8 @@ rows until a later request; enforce a separate retention job for strict deletion
 - Set AUTH_TELEGRAM_ENABLED=true only with TELEGRAM_FACTORY_ENABLED=true, a verified token,
   a strong webhook secret and an HTTPS TELEGRAM_WEBHOOK_BASE_URL.
 - Register and test the factory webhook on an origin reachable by Telegram. A Vercel preview
-  protected by Vercel Authentication cannot receive Telegram delivery.
+  protected by Vercel Authentication requires the isolated ingress in gateways/telegram-ingress;
+  keep the Vercel automation credential server-side and out of Telegram URLs.
 - Keep AUTH_DEV_BOOTSTRAP_ENABLED=false, RATE_LIMIT_ENABLED=true and session/security controls
   enabled. Production supports OIDC or this provider; neither is enabled implicitly.
 
