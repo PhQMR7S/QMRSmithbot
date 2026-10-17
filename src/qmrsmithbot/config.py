@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://qmrsmith:qmrsmith@localhost:5432/qmrsmith"
     redis_url: str = "redis://localhost:6379/0"
     telegram_factory_bot_token: SecretStr = SecretStr("")
+    telegram_factory_admin_ids: tuple[int, ...] = ()
     telegram_credential_encryption_key: SecretStr = SecretStr("")
     telegram_webhook_base_url: str = ""
     telegram_worker_poll_seconds: float = Field(default=1.0, ge=0.1, le=30.0)
@@ -40,6 +41,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_environment(self) -> "Settings":
+        if any(user_id <= 0 for user_id in self.telegram_factory_admin_ids):
+            raise ValueError("TELEGRAM_FACTORY_ADMIN_IDS must contain positive user IDs")
         environment = self.app_env.strip().lower()
         if environment not in {"development", "test", "staging", "production"}:
             raise ValueError("app_env must be development, test, staging, or production")
