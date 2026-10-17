@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     telegram_factory_bot_token: SecretStr = SecretStr("")
     telegram_factory_admin_ids: tuple[int, ...] = ()
     telegram_factory_enabled: bool = False
+    telegram_factory_username: str = ''
+    auth_telegram_enabled: bool = False
     telegram_runtime_consumer_verified: bool = False
     telegram_factory_webhook_secret: SecretStr = SecretStr("")
     telegram_credential_encryption_key: SecretStr = SecretStr("")
@@ -46,6 +48,15 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_environment(self) -> "Settings":
+        if self.auth_telegram_enabled:
+            import re
+            if not self.telegram_factory_enabled:
+                raise ValueError('Telegram login requires TELEGRAM_FACTORY_ENABLED')
+            if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{1,28}[Bb][Oo][Tt]',
+                                self.telegram_factory_username):
+                raise ValueError('TELEGRAM_FACTORY_USERNAME must be a bot username without @')
+            if not self.telegram_webhook_base_url:
+                raise ValueError('Telegram login requires TELEGRAM_WEBHOOK_BASE_URL')
         if self.telegram_factory_enabled:
             import re
             secret = self.telegram_factory_webhook_secret.get_secret_value()
@@ -82,8 +93,8 @@ class Settings(BaseSettings):
                 raise ValueError("AUTH_DEV_BOOTSTRAP_ENABLED must be false in production")
             if not self.rate_limit_enabled:
                 raise ValueError("RATE_LIMIT_ENABLED must be true in production")
-            if not self.auth_oidc_enabled:
-                raise ValueError("AUTH_OIDC_ENABLED must be true in production")
+            if not self.auth_oidc_enabled and not self.auth_telegram_enabled:
+                raise ValueError("AUTH_OIDC_ENABLED or AUTH_TELEGRAM_ENABLED must be true in production")
         if self.telegram_credential_encryption_key.get_secret_value().strip():
             try:
                 Fernet(

@@ -10,6 +10,7 @@ from qmrsmithbot.api.preferences import router as preferences_router
 from qmrsmithbot.api.projects import router as projects_router
 from qmrsmithbot.api.readiness import router as readiness_router
 from qmrsmithbot.api.telegram import router as telegram_router
+from qmrsmithbot.api.telegram_login import router as telegram_login_router
 from qmrsmithbot.api.telegram_webhook import router as telegram_webhook_router
 from qmrsmithbot.api.templates import router as templates_router
 from qmrsmithbot.api.tenants import router as tenants_router
@@ -48,6 +49,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="QMRSmithbot", version="0.1.0", lifespan=lifespan)
 app.include_router(auth_router)
+app.include_router(telegram_login_router)
 app.include_router(dashboard_router)
 app.include_router(factory_router)
 app.include_router(preferences_router)

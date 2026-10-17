@@ -11,8 +11,9 @@ from pydantic import SecretStr
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from qmrsmithbot.auth.telegram_login import TelegramLoginError, TelegramLoginService, digest
 from qmrsmithbot.config import settings
-from qmrsmithbot.db.factory_models import FactoryUpdateRecord
+from qmrsmithbot.db.factory_models import FactoryUpdateRecord, TelegramLoginChallengeRecord
 from qmrsmithbot.db.models import AuditEvent, BotProjectRecord, IdentityRecord, User
 from qmrsmithbot.factory.processor import FactoryProcessor
 from qmrsmithbot.rate_limit import PostgresRateLimiter
@@ -58,6 +59,8 @@ async def factory_database(monkeypatch):
                 await session.execute(delete(User).where(User.id == user_id))
             await session.execute(delete(FactoryUpdateRecord).where(
                 FactoryUpdateRecord.bot_id == bot_id))
+            await session.execute(delete(TelegramLoginChallengeRecord).where(
+                TelegramLoginChallengeRecord.bot_id == bot_id))
         await engine.dispose()
 
 
@@ -124,3 +127,89 @@ async def test_postgres_rate_limit_is_atomic_across_concurrent_sessions(factory_
         async with sessions() as session, session.begin():
             await session.execute(text('DELETE FROM security_rate_limits WHERE key=:key'),
                                   {'key': digest})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('wrong_count', [0, 4])
+async def test_telegram_login_requires_browser_secret_and_consumes_once(factory_database, monkeypatch, wrong_count):
+    processor, sessions, update, actor_id, _ = factory_database
+    monkeypatch.setattr(settings, 'auth_telegram_enabled', True)
+    monkeypatch.setattr(settings, 'telegram_factory_username', 'qmrsmith_test_bot')
+    async with sessions() as session, session.begin():
+        challenge = await TelegramLoginService(session).begin()
+    assert challenge['verification_code'] not in challenge['telegram_url']
+    async with sessions() as session, session.begin():
+        assert await TelegramLoginService(session).finish(
+            challenge['challenge_id'], challenge['browser_secret']) is None
+    response = await processor.process(update(text='/start login_' + challenge['challenge_id']))
+    assert '🔐' in response['text']
+    async with sessions() as session, session.begin():
+        with pytest.raises(TelegramLoginError):
+            await TelegramLoginService(session).bind(challenge['challenge_id'], actor_id + 1)
+    wrong = '000000' if challenge['verification_code'] != '000000' else '111111'
+    for _ in range(wrong_count):
+        await processor.process(update(text=wrong))
+    response = await processor.process(update(text=challenge['verification_code']))
+    assert '✅' in response['text']
+    async with sessions() as session, session.begin():
+        with pytest.raises(TelegramLoginError):
+            await TelegramLoginService(session).finish(challenge['challenge_id'], 'wrong-browser')
+        record = await session.get(TelegramLoginChallengeRecord, challenge['challenge_id'])
+        assert record.browser_secret_hash == digest(challenge['browser_secret'])
+        assert record.code_hash != challenge['verification_code']
+    async def finish():
+        async with sessions() as session, session.begin():
+            try:
+                return await TelegramLoginService(session).finish(
+                    challenge['challenge_id'], challenge['browser_secret'])
+            except TelegramLoginError:
+                return None
+    results = await asyncio.gather(finish(), finish())
+    assert sum(result is not None for result in results) == 1
+    result = next(result for result in results if result)
+    from qmrsmithbot.auth.service import SessionService
+    async with sessions() as session, session.begin():
+        principal = await SessionService(session).authenticate(result['access_token'])
+        identity_user_id = await session.scalar(select(IdentityRecord.user_id).where(
+            IdentityRecord.provider == 'telegram', IdentityRecord.subject == str(actor_id)))
+        assert principal.user_id == identity_user_id
+
+
+@pytest.mark.asyncio
+async def test_telegram_login_locks_after_five_wrong_codes_and_rejects_expiry(factory_database, monkeypatch):
+    processor, sessions, update, actor_id, _ = factory_database
+    monkeypatch.setattr(settings, 'auth_telegram_enabled', True)
+    monkeypatch.setattr(settings, 'telegram_factory_username', 'qmrsmith_test_bot')
+    async with sessions() as session, session.begin():
+        challenge = await TelegramLoginService(session).begin()
+    await processor.process(update(text='/start login_' + challenge['challenge_id']))
+    wrong = '000000' if challenge['verification_code'] != '000000' else '111111'
+    for _ in range(5):
+        await processor.process(update(text=wrong))
+    await processor.process(update(text=challenge['verification_code']))
+    async with sessions() as session, session.begin():
+        record = await session.get(TelegramLoginChallengeRecord, challenge['challenge_id'])
+        assert record.attempts == 5 and record.approved_user_id is None
+        with pytest.raises(TelegramLoginError):
+            await TelegramLoginService(session).finish(challenge['challenge_id'], challenge['browser_secret'])
+        expired = await TelegramLoginService(session).begin()
+        await session.execute(text('UPDATE telegram_login_challenges SET '
+            "expires_at=statement_timestamp()-interval '1 second' WHERE id=:id"),
+            {'id': expired['challenge_id']})
+    async with sessions() as session, session.begin():
+        with pytest.raises(TelegramLoginError):
+            await TelegramLoginService(session).bind(expired['challenge_id'], actor_id)
+
+
+@pytest.mark.asyncio
+async def test_browser_can_cancel_before_telegram_approval(factory_database, monkeypatch):
+    _, sessions, _, actor_id, _ = factory_database
+    monkeypatch.setattr(settings, 'auth_telegram_enabled', True)
+    monkeypatch.setattr(settings, 'telegram_factory_username', 'qmrsmith_test_bot')
+    async with sessions() as session, session.begin():
+        challenge = await TelegramLoginService(session).begin()
+    async with sessions() as session, session.begin():
+        await TelegramLoginService(session).cancel(challenge['challenge_id'], challenge['browser_secret'])
+    async with sessions() as session, session.begin():
+        with pytest.raises(TelegramLoginError):
+            await TelegramLoginService(session).bind(challenge['challenge_id'], actor_id)

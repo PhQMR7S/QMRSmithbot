@@ -24,6 +24,7 @@ def test_database_schema_contains_expected_tables() -> None:
     expected = {
         "users",
         "security_rate_limits",
+        "telegram_login_challenges",
         "factory_updates",
         "factory_conversations",
         "identities",
