@@ -29,11 +29,18 @@ class FactoryProcessor:
         actor = private_actor(update)
         if actor is None:
             return None
+        token = settings.telegram_factory_bot_token.get_secret_value()
+        bot_id_text, separator, _ = token.partition(':')
+        if not separator or not bot_id_text.isascii() or not bot_id_text.isdigit():
+            raise RuntimeError('Factory bot identity is not configured')
+        bot_id = int(bot_id_text)
+        if bot_id <= 0:
+            raise RuntimeError('Factory bot identity is not configured')
         async with self.sessions() as session, session.begin():
             # Serialize menu transitions for one actor; duplicate update IDs cannot create twice.
             await session.execute(select(func.pg_advisory_xact_lock(actor.id)))
             accepted = await session.scalar(insert(FactoryUpdateRecord).values(
-                update_id=update.update_id).on_conflict_do_nothing().returning(
+                bot_id=bot_id, update_id=update.update_id).on_conflict_do_nothing().returning(
                     FactoryUpdateRecord.update_id))
             if accepted is None:
                 return None

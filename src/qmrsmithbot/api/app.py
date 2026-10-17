@@ -1,15 +1,14 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, RedirectResponse
-from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
+from fastapi.responses import JSONResponse
 
 from qmrsmithbot.api.auth import router as auth_router
 from qmrsmithbot.api.dashboard import router as dashboard_router
 from qmrsmithbot.api.factory import router as factory_router
 from qmrsmithbot.api.preferences import router as preferences_router
 from qmrsmithbot.api.projects import router as projects_router
+from qmrsmithbot.api.readiness import router as readiness_router
 from qmrsmithbot.api.telegram import router as telegram_router
 from qmrsmithbot.api.telegram_webhook import router as telegram_webhook_router
 from qmrsmithbot.api.templates import router as templates_router
@@ -21,7 +20,7 @@ from qmrsmithbot.auth.service import (
     TenantAdministrationError,
     TenantSelectionRequired,
 )
-from qmrsmithbot.db.session import SessionFactory, close_database
+from qmrsmithbot.db.session import close_database
 from qmrsmithbot.projects.service import (
     InvalidWorkflowError,
     ProjectNotFoundError,
@@ -53,6 +52,7 @@ app.include_router(dashboard_router)
 app.include_router(factory_router)
 app.include_router(preferences_router)
 app.include_router(projects_router)
+app.include_router(readiness_router)
 app.include_router(tenants_router)
 app.include_router(templates_router)
 app.include_router(telegram_router)
@@ -133,26 +133,6 @@ async def telegram_webhook_not_ready(_: Request, exc: TelegramWebhookNotReady) -
 @app.exception_handler(TelegramWebhookError)
 async def telegram_webhook_error(_: Request, exc: TelegramWebhookError) -> JSONResponse:
     return JSONResponse(status_code=502, content={"detail": str(exc)})
-
-
-@app.get("/", include_in_schema=False)
-async def homepage() -> RedirectResponse:
-    return RedirectResponse(url="/dashboard", status_code=307)
-
-
-@app.get("/ready", include_in_schema=False)
-async def ready() -> JSONResponse:
-    """Readiness requires a working database; never leak connection details."""
-    try:
-        async with SessionFactory() as session:
-            await session.execute(text("SELECT 1"))
-            # A database connection alone is not enough to serve the application.
-            applied = await session.execute(text("SELECT version_num FROM alembic_version"))
-            if applied.scalar_one_or_none() != "20261017_01":
-                return JSONResponse(status_code=503, content={"status": "unavailable"})
-    except (SQLAlchemyError, OSError, TimeoutError):
-        return JSONResponse(status_code=503, content={"status": "unavailable"})
-    return JSONResponse(status_code=200, content={"status": "ready"})
 
 
 @app.get("/health")

@@ -36,13 +36,17 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install runtime
-        run: pip install .
+      - name: Install project and test dependencies
+        run: pip install '.[dev]'
       - name: Apply all migrations on PostgreSQL and verify repeatability
         run: |
           alembic upgrade head
           alembic upgrade head
           alembic current
+      - name: Exercise factory transactions and concurrent duplicate delivery
+        env:
+          QMRSMITH_INTEGRATION_DATABASE_URL: postgresql+asyncpg://qmrsmith:ci-only-password@localhost:5432/qmrsmith
+        run: pytest -q tests/test_factory_postgres.py
 
   quality:
     runs-on: ubuntu-latest
