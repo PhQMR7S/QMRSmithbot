@@ -1,5 +1,4 @@
 """Regression coverage for unexpected errors in the durable inbox worker."""
-from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import pytest
