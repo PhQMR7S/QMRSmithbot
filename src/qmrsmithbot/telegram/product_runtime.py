@@ -14,7 +14,7 @@ from qmrsmithbot.db.models import IdentityRecord
 from qmrsmithbot.telegram.client import TelegramBotClientFactory
 from qmrsmithbot.telegram.inline_runtime import InlineBotError
 
-FILE_TYPES = ('document', 'photo', 'video', 'audio', 'voice', 'animation', 'video_note', 'sticker')
+FILE_TYPES = ('animation', 'video_note', 'sticker', 'photo', 'video', 'audio', 'voice', 'document')
 FILE_METHODS = {kind: 'send' + ''.join(word.title() for word in kind.split('_')) for kind in FILE_TYPES}
 
 

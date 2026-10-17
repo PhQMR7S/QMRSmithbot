@@ -37,7 +37,7 @@ acknowledge updates without replying. Each accepted running-bot update stores it
 messages are not retained in this cache. Duplicate requests replay the cached command.
 This prevents duplicate workflow evaluation but does not guarantee exactly-once message
 arrival: Telegram retries may produce duplicate replies, and webhook response delivery
-cannot be acknowledged independently. No external action is executed by this transport.
+cannot be acknowledged independently. The plain-text branch executes no external action. The separate contact mode uses bounded copyMessage calls; see BUTTONS_AND_CONTACT.md.
 The reply cache currently has no automatic retention job; capacity must be monitored.
 
 The advanced queue consumer gate stays disabled. Do not infer support for HTTP, delayed jobs,
