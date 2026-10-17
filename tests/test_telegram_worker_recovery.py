@@ -45,7 +45,16 @@ class ExplodingBoundary:
         raise self.error
 
 
-@pytest.mark.parametrize(\n    ("error", "expected_message", "terminal"),\n    [\n        (RuntimeError("secret user-provided payload"), "unexpected handler error: RuntimeError", False),\n        (RetryableTelegramUpdateError("secret token"), "retryable handler error: RetryableTelegramUpdateError", False),\n        (NonRetryableTelegramUpdateError("secret token"), "non-retryable handler error: NonRetryableTelegramUpdateError", True),\n    ],\n)\n@pytest.mark.asyncio\nasync def test_handler_errors_do_not_leak_payload(monkeypatch, error, expected_message, terminal):
+@pytest.mark.parametrize(
+    ("error", "expected_message", "terminal"),
+    [
+        (RuntimeError("secret user-provided payload"), "unexpected handler error: RuntimeError", False),
+        (RetryableTelegramUpdateError("secret token"), "retryable handler error: RetryableTelegramUpdateError", False),
+        (NonRetryableTelegramUpdateError("secret token"), "non-retryable handler error: NonRetryableTelegramUpdateError", True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_handler_errors_do_not_leak_payload(monkeypatch, error, expected_message, terminal):
     from qmrsmithbot.telegram import worker as module
 
     FakeQueue.failures = []
@@ -68,6 +77,7 @@ class ExplodingBoundary:
     failure = FakeQueue.failures[0]
     assert failure["update_id"] == FakeQueue.item.id
     assert failure["claim_token"] == FakeQueue.item.claim_token
-    assert failure["retry_delay_seconds"] >= (0 if terminal else 1)\n    assert failure.get("terminal", False) is terminal
+    assert failure["retry_delay_seconds"] >= (0 if terminal else 1)
+    assert failure.get("terminal", False) is terminal
     assert failure["error"] == expected_message
     assert "secret" not in failure["error"]
