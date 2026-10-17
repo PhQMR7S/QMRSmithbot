@@ -49,8 +49,16 @@ class ExplodingBoundary:
     ("error", "expected_message", "terminal"),
     [
         (RuntimeError("secret user-provided payload"), "unexpected handler error: RuntimeError", False),
-        (RetryableTelegramUpdateError("secret token"), "retryable handler error: RetryableTelegramUpdateError", False),
-        (NonRetryableTelegramUpdateError("secret token"), "non-retryable handler error: NonRetryableTelegramUpdateError", True),
+        (
+            RetryableTelegramUpdateError("secret token"),
+            "retryable handler error: RetryableTelegramUpdateError",
+            False,
+        ),
+        (
+            NonRetryableTelegramUpdateError("secret token"),
+            "non-retryable handler error: NonRetryableTelegramUpdateError",
+            True,
+        ),
     ],
 )
 @pytest.mark.asyncio
