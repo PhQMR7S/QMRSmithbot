@@ -29,7 +29,8 @@ class FactoryProcessor:
         self.sessions = sessions
 
     async def process(self, update: Update):
-        actor = private_actor(update)
+        event = update.managed_bot
+        actor = event.user if event and not event.user.is_bot and event.user.id > 0 else private_actor(update)
         if actor is None:
             return None
         token = settings.telegram_factory_bot_token.get_secret_value()
@@ -51,8 +52,13 @@ class FactoryProcessor:
             menu = FactoryMenu(store, telegram_id=actor.id,
                                admin=actor.id in settings.telegram_factory_admin_ids, management=BotManagement(store))
             try:
+                if event is not None:
+                    from qmrsmithbot.factory.managed_bots import receive_managed
+                    response = await receive_managed(menu.management, menu, event)
+                    if response is None:
+                        return None
                 message_text = update.message.text if update.message else None
-                response = await handle_web_login(session, store, telegram_id=actor.id,
+                response = response if event is not None else await handle_web_login(session, store, telegram_id=actor.id,
                                                   message_text=message_text)
                 if response is None:
                     response = await menu.handle(text=message_text,

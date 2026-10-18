@@ -143,6 +143,30 @@ class BotManagement:
             await self.session.flush()
             await self.store.audit('factory.bot.activated', project_id, self.store.user.id, self.store.tenant_id)
 
+    async def save_profile(self, project_id, field, value):
+        limits = {'name': 64, 'description': 512, 'about': 120}
+        if field not in limits or not 0 < len(value.strip()) <= limits[field]:
+            raise ValueError()
+        await self.project(project_id, Permission.PROJECT_WRITE, lock=True)
+        credential = await self.session.get(BotCredentialRecord, project_id)
+        if credential is None:
+            raise InlineBotError('unbound')
+        bot = make_bot(decrypt_bot_token(credential.token_ciphertext))
+        try:
+            if field == 'name':
+                ok = await bot.set_my_name(name=value.strip())
+            elif field == 'description':
+                ok = await bot.set_my_description(description=value.strip())
+            else:
+                ok = await bot.set_my_short_description(short_description=value.strip())
+            if not ok:
+                raise RuntimeError()
+        except (TelegramAPIError, OSError, TimeoutError, RuntimeError):
+            raise InlineBotError('profile') from None
+        finally:
+            await bot.session.close()
+        await self.store.audit('factory.bot.profile_updated', project_id, self.store.user.id, self.store.tenant_id)
+
     async def save_content(self, project_id, *, welcome=None, rules=None, mode=None):
         await self.project(project_id, Permission.PROJECT_WRITE, lock=True)
         version = await self.latest(project_id)
@@ -195,11 +219,27 @@ class BotManagement:
                 return menu.response(tr('🧭 خطوات إنشاء بوتك\n\n1. اختر قالبًا وأدخل المحتوى.\n2. افتح لوحة المشروع واربط توكن البوت من @BotFather.\n3. عاين المحتوى ثم اضغط «نشر وتشغيل».\n\nيمكنك تعديل الترحيب والردود وإيقاف البوت من لوحته. التوكن يُشفّر ولا يظهر في اللوحة.',
                     '🧭 Create your bot\n\n1. Choose a template and add content.\n2. Open its panel and connect the bot token from @BotFather.\n3. Preview, then Publish & run.\n\nEdit content or stop your bot from its panel. Tokens are encrypted and never displayed.'))
             if callback and ':' in callback:
+                if callback.startswith('profile:'):
+                    _, field, raw_project = callback.split(':', 2)
+                    project_id = UUID(raw_project)
+                    await self.project(project_id, Permission.PROJECT_WRITE)
+                    limits = {'name': 64, 'description': 512, 'about': 120}
+                    if field not in limits:
+                        raise ValueError()
+                    await menu.save_state(MenuState('bot_profile', {'project_id': raw_project, 'field': field}))
+                    return menu.response(tr(f'أرسل النص الجديد (حتى {limits[field]} حرفًا). يُطبّق مباشرة على ملف البوت في تيليجرام. /cancel للإلغاء.',
+                        f'Send the new text (up to {limits[field]} characters). Applies directly to the Telegram bot profile. /cancel to cancel.'), [back(project_id)])
+                if callback.startswith('managedok:'):
+                    from qmrsmithbot.factory.managed_bots import confirm_binding
+                    return await confirm_binding(self, menu, callback.split(':', 1)[1])
                 action, raw = callback.split(':', 1)
-                if action in ('project', 'bind', 'preview', 'rename', 'welcome', 'rules', 'rulesmsg', 'rulescmd', 'launchask', 'connection', 'botsettings', 'simulate', 'contactsetup'):
+                if action in ('project', 'managed', 'bind', 'preview', 'rename', 'welcome', 'rules', 'rulesmsg', 'rulescmd', 'launchask', 'connection', 'botsettings', 'simulate', 'contactsetup'):
                     project_id = UUID(raw)
                     project = await self.project(project_id)
                     program = compile_text_program((await self.latest(project_id)).definition)
+                    if action == 'managed':
+                        from qmrsmithbot.factory.managed_bots import prepare_creation
+                        return await prepare_creation(self, menu, project)
                     if action == 'project':
                         await self.store.save_state(MenuState('idle', {}))
                         version = await self.latest(project_id)
@@ -237,13 +277,18 @@ class BotManagement:
                     if action == 'connection':
                         connected = '@' + project.telegram_username if project.telegram_username else tr('لم يتم الربط بعد', 'Not connected yet')
                         rows = [[button('🔗 ربط أو تحديث التوكن', '🔗 Connect or update token', 'bind:' + raw)]]
+                        if project.telegram_bot_id is None:
+                            rows.insert(0, [button('✨ إنشاء داخل تيليجرام', '✨ Create in Telegram', 'managed:' + raw)])
                         if project.telegram_username:
                             rows.append([{'text': tr('↗ فتح البوت', '↗ Open bot'), 'url': 'https://t.me/' + project.telegram_username}])
                         rows.append(back(project_id))
                         return menu.response(tr('🔐 اتصال البوت\n\n', '🔐 Bot connection\n\n') + connected + tr('\n\nالتوكن مشفّر ولا يُعرض هنا. تحديثه يقبل نفس هوية البوت فقط.', '\n\nThe token is encrypted and never shown here. Updates must belong to the same bot.'), rows)
                     if action == 'botsettings':
                         return menu.response(tr('⚙️ إعدادات البوت\n', '⚙️ Bot settings\n')+project.name,
-                            [[button('✏️ تغيير اسم المشروع', '✏️ Rename project', 'rename:' + raw)], back(project_id)])
+                            [[button('✏️ تغيير اسم المشروع', '✏️ Rename project', 'rename:' + raw)],
+                             [button('🤖 اسم البوت في تيليجرام', '🤖 Telegram display name', 'profile:name:' + raw)],
+                             [button('📝 وصف البوت', '📝 Bot description', 'profile:description:' + raw),
+                              button('ℹ️ نبذة البوت', 'ℹ️ Bot bio', 'profile:about:' + raw)], back(project_id)])
                     if action == 'simulate':
                         await menu.save_state(MenuState('bot_test', {'project_id': raw}))
                         return menu.response(tr('🧪 جرّب محتواك\n\nأرسل كلمة أو أمرًا مثل /help لاختبار الرد من آخر مسودة. للخروج اضغط الرجوع أو /cancel.',
@@ -291,7 +336,7 @@ class BotManagement:
                 if re.search(r'\b[0-9]{5,16}:[A-Za-z0-9_-]{20,}\b', text):
                     raise InlineBotError('token')
                 return menu.response(tr('👁 نتيجة التجربة\n\n', '👁 Test result\n\n') + (value if value is not None else tr('ماكو رد مطابق لهالرسالة. أضفه من استوديو المحتوى.', 'No matching reply. Add one in the content studio.')), [back(project_id)])
-            if text and not text.startswith('/') and state.step in ('bot_token', 'bot_name', 'bot_welcome', 'bot_rules'):
+            if text and not text.startswith('/') and state.step in ('bot_token', 'bot_name', 'bot_welcome', 'bot_rules', 'bot_profile'):
                 project_id = UUID(state.data['project_id'])
                 if state.step == 'bot_token':
                     username = await self.bind(project_id, text)
@@ -299,7 +344,10 @@ class BotManagement:
                 else:
                     if re.search(r'\b[0-9]{5,16}:[A-Za-z0-9_-]{20,}\b', text):
                         raise InlineBotError('token')
-                    if state.step == 'bot_name':
+                    if state.step == 'bot_profile':
+                        await self.save_profile(project_id, state.data['field'], text)
+                        result = tr('✅ تم تحديث ملف البوت في تيليجرام.', '✅ Telegram bot profile updated.')
+                    elif state.step == 'bot_name':
                         await self.project(project_id, Permission.PROJECT_WRITE)
                         await self.store.projects_service.rename(project_id=project_id, tenant_id=self.store.tenant_id,
                             name=text, actor_user_id=self.store.user.id)
@@ -327,10 +375,11 @@ class BotManagement:
                       'factory': tr('هذا توكن المصنع. استخدم توكن بوت آخر.', 'This is the factory token. Use a different bot.'),
                       'assigned': tr('هذا البوت مربوط بمشروع آخر.', 'This bot is connected to another project.'),
                       'different': tr('المشروع مربوط ببوت آخر. أنشئ مشروعًا جديدًا للبوت الجديد.', 'This project already has a different bot. Create a new project for the new bot.'),
+                      'profile': tr('تعذر تحديث ملف البوت من تيليجرام. راجع الاتصال وحاول مجددًا.', 'Telegram profile update failed. Check the connection and retry.'),
                       'unbound': tr('اربط توكن البوت أولًا.', 'Connect the bot token first.'),
                       'missing': menu.text('missing'),
                       'launch': tr('تعذر تأكيد التشغيل من تيليجرام. أعد المحاولة.', 'Telegram activation could not be verified. Try again.'),
                       'unavailable': tr('خدمة التشغيل قيد التجهيز. حاول لاحقًا.', 'Runtime setup is in progress. Try later.')}
-            return menu.response(errors.get(str(exc), tr('تعذر حفظ الإعداد. راجع المحتوى؛ التشغيل الحالي يدعم القوالب النصية فقط.',
-                'Could not save this setting. Check the content; this runtime supports plain-text templates only.')))
+            return menu.response(errors.get(str(exc), tr('تعذر حفظ الإعداد. راجع طول النص وصيغته، ثم حاول مجددًا.',
+                'Could not save this setting. Check the text length and format, then try again.')))
         return None

@@ -562,3 +562,55 @@ async def test_contact_bot_routes_only_owner_replies_blocks_and_deduplicates(fac
     await processor.process(update(callback=ask['reply_markup']['inline_keyboard'][0][0]['callback_data']))
     assert (await deliver(text='Stopped',actor=visitor))[0] is None
     assert fake.copy_message.await_count==count+1
+
+
+@pytest.mark.asyncio
+async def test_native_managed_creation_confirmation_and_duplicate_event(factory_database, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from uuid import UUID
+
+    from cryptography.fernet import Fernet
+
+    from qmrsmithbot.db.models import BotCredentialRecord
+
+    processor, sessions, update, actor_id, factory_id = factory_database
+    monkeypatch.setattr(settings, 'telegram_inline_runtime_enabled', True)
+    monkeypatch.setattr(settings, 'telegram_factory_webhook_secret', SecretStr('S'*40))
+    monkeypatch.setattr(settings, 'telegram_credential_encryption_key', SecretStr(Fernet.generate_key().decode()))
+    child_id = int(uuid4().hex[:10], 16) + 100000
+    child_token = f'{child_id}:' + 'T'*35
+    factory = SimpleNamespace(get_me=AsyncMock(return_value=SimpleNamespace(
+        id=factory_id, username='ManagerBot',can_manage_bots=True)),
+        get_managed_bot_token=AsyncMock(return_value=child_token),
+        session=SimpleNamespace(close=AsyncMock()))
+    child = SimpleNamespace(get_me=AsyncMock(return_value=SimpleNamespace(
+        id=child_id, username='NativeBot',is_bot=True)),session=SimpleNamespace(close=AsyncMock()))
+    monkeypatch.setattr('qmrsmithbot.factory.bot_management.make_bot',
+        lambda token: child if token == child_token else factory)
+    await processor.process(update(callback='template:welcome'))
+    await processor.process(update(text='Native project'))
+    review = await processor.process(update(text='Hello'))
+    created = await processor.process(update(callback=review['reply_markup']['inline_keyboard'][0][0]['callback_data']))
+    project_id = UUID(created['reply_markup']['inline_keyboard'][0][0]['callback_data'].split(':')[1])
+    native = await processor.process(update(callback='managed:'+str(project_id)))
+    assert native['reply_markup']['inline_keyboard'][0][0]['url'].startswith('https://t.me/newbot/ManagerBot/')
+    event = Update.model_validate({'update_id':900001, 'managed_bot': {
+        'user':{'id':actor_id,'is_bot':False,'first_name':'Integration'},
+        'bot':{'id':child_id,'is_bot':True,'first_name':'Native','username':'NativeBot'}}})
+    received = await processor.process(event)
+    assert 'NativeBot' in received['text'] and received['chat_id'] == actor_id
+    assert await processor.process(event) is None
+    async with sessions() as session:
+        project = await session.get(BotProjectRecord,project_id)
+        assert project.telegram_bot_id == child_id and project.status == 'draft'
+        assert await session.get(BotCredentialRecord,project_id) is None
+    confirmation = received['reply_markup']['inline_keyboard'][0][0]['callback_data']
+    bound = await processor.process(update(callback=confirmation))
+    assert '✅' in bound['text']
+    async with sessions() as session:
+        credential = await session.get(BotCredentialRecord,project_id)
+        assert child_token not in credential.token_ciphertext
+    factory.get_managed_bot_token.assert_awaited_once_with(user_id=child_id)
+    await processor.process(update(callback=confirmation))
+    factory.get_managed_bot_token.assert_awaited_once()
