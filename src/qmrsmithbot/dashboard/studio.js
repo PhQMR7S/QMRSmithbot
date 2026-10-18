@@ -282,16 +282,14 @@ export class Studio {
     );
     this.root.append(top);
     const title = node("div", undefined, "studio-heading");
-    title.append(
-      node("h2", this.project.name),
-      node(
-        "span",
-        this.t("connected") +
-          ": " +
-          (this.data.username ? "@" + this.data.username : this.t("unbound")),
-        "muted",
-      ),
+    const connected = node("span", undefined, "muted");
+    const username = node(
+      "bdi",
+      this.data.username ? "@" + this.data.username : this.t("unbound"),
     );
+    username.dir = this.data.username ? "ltr" : "auto";
+    connected.append(node("span", this.t("connected") + ": "), username);
+    title.append(node("h2", this.project.name), connected);
     this.root.append(title);
     const tabs = node("div", undefined, "studio-mobile-tabs");
     const designTab = this.button(

@@ -72,3 +72,22 @@ async def test_form_runtime_ignores_groups_and_forged_callback_authors():
     message['chat']={'id':-100,'type':'supergroup'}
     update=Update.model_validate({'update_id':2,'message':message})
     assert await form_response(None,project,None,update) is None
+
+
+@pytest.mark.asyncio
+async def test_choice_navigation_edits_only_the_verified_bot_prompt():
+    from unittest.mock import AsyncMock, MagicMock
+
+    from qmrsmithbot.forms.runtime import form_response
+    actor={'id':7,'is_bot':False,'first_name':'Test'}
+    message={'message_id':8,'date':0,'chat':{'id':7,'type':'private'},
+        'from':{'id':12345,'is_bot':True,'first_name':'Bot'},'text':'Welcome'}
+    update=Update.model_validate({'update_id':1,'callback_query':{'id':'a','from':actor,
+        'chat_instance':'x','message':message,'data':'f:start:2'}})
+    session=SimpleNamespace(get=AsyncMock(return_value=None),add=MagicMock())
+    project=SimpleNamespace(id=uuid4(),telegram_bot_id=12345,active_version=2)
+    program=SimpleNamespace(form=default_form(),commands={'start':'Welcome'})
+    response=await form_response(session,project,program,update)
+    assert response['method']=='editMessageText' and response['message_id']==8
+    assert response['chat_id']==7
+    session.add.assert_called_once()

@@ -30,7 +30,7 @@ def prompt(actor_id, state, prefix=''):
     return say(actor_id,prefix+f'{form.title}\n{index+1}/{len(form.questions)}\n\n'+question.prompt,rows)
 
 
-async def form_response(session, project, program, update):
+async def _form_response(session, project, program, update):
     callback=update.callback_query
     message=callback.message if callback else update.message
     actor=callback.from_user if callback else message.from_user if message else None
@@ -119,3 +119,13 @@ async def form_response(session, project, program, update):
     record.data={**state,'question':target,'answers':answers}
     record.expires_at=now+timedelta(minutes=30)
     return prompt(actor.id,record.data)
+
+
+async def form_response(session, project, program, update):
+    response=await _form_response(session,project,program,update)
+    callback=update.callback_query
+    # Choice navigation updates the bot's own prompt instead of flooding the chat.
+    # _form_response has already validated the private actor and message author.
+    if response is not None and callback and getattr(callback.message,'text',None):
+        response={**response,'method':'editMessageText','message_id':callback.message.message_id}
+    return response
