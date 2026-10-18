@@ -196,3 +196,12 @@ async def test_appearance_survives_navigation_and_wizard():
     assert 'New name' in review['text'] and store.conversation.step == 'confirm'
     await menu.handle(text='/plain')
     assert store.conversation.data['_ui']['rich'] is False
+
+
+async def test_studio_return_link_uses_the_scoped_project_panel():
+    project_id=uuid4()
+    manager=SimpleNamespace(handle=AsyncMock(return_value={'text':'Scoped panel'}))
+    menu=FactoryMenu(Store(),telegram_id=42,management=manager)
+    response=await menu.handle(text='/start project_'+project_id.hex)
+    assert response['text']=='Scoped panel'
+    assert manager.handle.call_args.kwargs=={'text':None,'callback':'project:'+str(project_id)}

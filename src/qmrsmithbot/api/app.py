@@ -11,6 +11,7 @@ from qmrsmithbot.api.inline_bots import router as inline_bots_router
 from qmrsmithbot.api.preferences import router as preferences_router
 from qmrsmithbot.api.projects import router as projects_router
 from qmrsmithbot.api.readiness import router as readiness_router
+from qmrsmithbot.api.studio import router as studio_router
 from qmrsmithbot.api.telegram import router as telegram_router
 from qmrsmithbot.api.telegram_login import router as telegram_login_router
 from qmrsmithbot.api.telegram_webhook import router as telegram_webhook_router
@@ -57,6 +58,7 @@ app.include_router(factory_router)
 app.include_router(inline_bots_router)
 app.include_router(preferences_router)
 app.include_router(projects_router)
+app.include_router(studio_router)
 app.include_router(readiness_router)
 app.include_router(tenants_router)
 app.include_router(templates_router)

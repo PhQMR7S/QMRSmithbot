@@ -39,6 +39,7 @@ jobs:
           trap 'kill "$app_pid"' EXIT
           curl --fail --silent --retry 20 --retry-connrefused --retry-delay 1 "$BASE_URL/health"
           node tests/dashboard.browser.cjs
+          node tests/studio.browser.cjs
           node tests/telegram_login.browser.cjs
       - uses: actions/upload-artifact@v4
         if: always()

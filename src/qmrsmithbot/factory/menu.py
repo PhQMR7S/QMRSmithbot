@@ -82,6 +82,9 @@ class FactoryMenu:
 
     async def handle(self, *, text=None, callback=None):
         self.lang = await self.store.language()
+        if self.management is not None and text and re.fullmatch(r'/start project_[0-9a-fA-F]{32}', text):
+            callback = 'project:' + str(UUID(text.split('project_', 1)[1]))
+            text = None
         from qmrsmithbot.factory.experience import experience
         response = await experience(self, text=text, callback=callback)
         if response is not None:

@@ -24,6 +24,6 @@ async def dashboard():
 
 @router.get('/dashboard/assets/{filename}')
 async def dashboard_asset(filename: str):
-    if filename not in {'app.js', 'api.js', 'i18n.js', 'style.css'}:
+    if filename not in {'app.js', 'api.js', 'i18n.js', 'style.css', 'studio.js'}:
         raise HTTPException(status_code=404)
     return FileResponse(ROOT / filename, headers=HEADERS)

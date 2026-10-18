@@ -1,6 +1,6 @@
 # Telegram ingress
 
-This small service exposes only GET /health and POST /webhook. Telegram stores a normal
+This service exposes health, secret-authenticated Telegram webhook routes, and a path-allowlisted authenticated dashboard proxy. See docs/VISUAL_STUDIO.md in the repository for the dashboard boundary. Telegram stores a normal
 webhook URL without any Vercel credential. Requests must carry the factory's strong
 X-Telegram-Bot-Api-Secret-Token before any payload is forwarded.
 
@@ -16,8 +16,7 @@ Required server environment secrets:
 
 Deploy this directory as a separate FastAPI project. Its production /webhook endpoint must
 be publicly reachable while enforcing the Telegram secret; preview deployments can remain
-protected. Do not broaden access to the main dashboard or its API. The ingress rejects all
-query parameters, invalid payloads, excessive body sizes and unexpected upstream responses.
+protected. The main application retains Vercel protection. Dashboard APIs require application sessions and tenant authorization; arbitrary routes, development authentication and credential APIs remain inaccessible. Telegram webhook routes reject all query parameters; dashboard routes accept only enumerated query fields. All routes bound payloads and reject unexpected upstream responses.
 Upstream failures return a generic 503 so Telegram can retry.
 
 This service does not run generated-bot queue consumers. It only delivers factory updates.

@@ -614,3 +614,81 @@ async def test_native_managed_creation_confirmation_and_duplicate_event(factory_
     factory.get_managed_bot_token.assert_awaited_once_with(user_id=child_id)
     await processor.process(update(callback=confirmation))
     factory.get_managed_bot_token.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_studio_shares_native_drafts_scopes_items_and_detects_stale_writes(factory_database,monkeypatch):
+    from qmrsmithbot.api.app import app
+    from qmrsmithbot.api.dependencies import get_current_principal, get_current_tenant_id
+    from qmrsmithbot.auth.models import Principal
+    from qmrsmithbot.db.factory_models import FactoryButtonRecord
+    from qmrsmithbot.db.session import get_session
+
+    processor,sessions,update,_actor_id,_=factory_database
+    project_id,_,_,_=await create_product_bot(factory_database,monkeypatch,'buttons')
+    async with sessions() as session:
+        project=await session.get(BotProjectRecord,project_id)
+        owner_id,tenant_id=project.owner_id,project.tenant_id
+    async def session_override():
+        async with sessions() as session,session.begin():
+            yield session
+    app.dependency_overrides[get_session]=session_override
+    app.dependency_overrides[get_current_principal]=lambda:Principal(owner_id,uuid4())
+    app.dependency_overrides[get_current_tenant_id]=lambda:tenant_id
+    prefix=f'/api/v1/projects/{project_id}/studio'
+    item_id=uuid4()
+    body={'kind':'section','title':'الدروس'}
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='https://test') as client:
+            initial=(await client.get(prefix)).json()
+            assert initial['kind']=='buttons'
+            created=await client.put(prefix+f'/buttons/{item_id}',json=body)
+            assert created.status_code==200
+            data=created.json()
+            assert data['pending'] and not data['published']
+            assert (await client.put(prefix+f'/buttons/{item_id}',json=body)).json()['id']==str(item_id)
+            async with sessions() as session:
+                rows=(await session.scalars(select(FactoryButtonRecord).where(FactoryButtonRecord.id==item_id))).all()
+                assert len(rows)==1 and rows[0].published is None
+            listing=(await client.get(prefix+'/buttons')).json()
+            assert listing['items'][0]['title']=='الدروس'
+            changed=await client.put(prefix+f'/buttons/{item_id}',json={**body,'title':'دروس جديدة','revision':data['revision']})
+            assert changed.status_code==200
+            assert (await client.put(prefix+f'/buttons/{item_id}',json={**body,'revision':data['revision']})).status_code==409
+            assert (await client.post(prefix+f'/buttons/{item_id}/delete',json={'revision':data['revision']})).status_code==409
+            unknown=f'/api/v1/projects/{uuid4()}/studio'
+            assert (await client.get(unknown+'/buttons')).status_code==404
+            assert (await client.put(unknown+f'/buttons/{item_id}',json=body)).status_code==404
+            # A non-section cannot be a parent; a file ID can only come from the child bot.
+            text_id=uuid4()
+            text_body={'kind':'text','title':'عنوان','text':'شرح'}
+            assert (await client.put(prefix+f'/buttons/{text_id}',json=text_body)).status_code==200
+            assert (await client.put(prefix+f'/buttons/{uuid4()}',json={**text_body,'parent_id':str(text_id)})).status_code==422
+            assert (await client.put(prefix+f'/buttons/{uuid4()}',json={'kind':'file','title':'ملف','file_id':'injected'})).status_code==422
+            # Both editors observe each other's data; native rename invalidates the web revision.
+            native=await processor.process(update(callback='btitle:'+item_id.hex))
+            assert native
+            await processor.process(update(text='من داخل تيليجرام'))
+            assert (await client.put(prefix+f'/buttons/{item_id}',json={**body,'revision':changed.json()['revision']})).status_code==409
+            newest=(await client.get(prefix+'/buttons')).json()['items'][0]
+            assert newest['title']=='من داخل تيليجرام'
+            welcome=await client.patch(prefix,json={'version':initial['version'],'welcome':'ترحيب جديد'})
+            assert welcome.status_code==200 and welcome.json()['version']>initial['version']
+            assert (await client.patch(prefix,json={'version':initial['version'],'welcome':'نص قديم'})).status_code==409
+            removed=await client.post(prefix+f'/buttons/{item_id}/delete',json={'revision':newest['revision']})
+            assert removed.status_code==200
+            # The current published snapshot remains untouched by editor writes.
+            async with sessions() as session:
+                item=await session.get(FactoryButtonRecord,item_id)
+                assert item.deleted and item.published is None
+            from qmrsmithbot.db.models import TenantMembershipRecord
+            async with sessions() as session,session.begin():
+                membership=await session.scalar(select(TenantMembershipRecord).where(
+                    TenantMembershipRecord.tenant_id==tenant_id,TenantMembershipRecord.user_id==owner_id))
+                membership.role='viewer'
+            assert (await client.get(prefix)).status_code==200
+            assert (await client.put(prefix+f'/buttons/{uuid4()}',json=body)).status_code==403
+            assert (await client.patch(prefix,json={'version':welcome.json()['version'],'welcome':'ممنوع'})).status_code==403
+    finally:
+        for dep in (get_session,get_current_principal,get_current_tenant_id):
+            app.dependency_overrides.pop(dep,None)

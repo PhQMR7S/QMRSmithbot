@@ -1,4 +1,4 @@
-# Deployment status — 2026-10-17
+# Deployment status — 2026-10-18
 
 Repository: PhQMR7S/QMRSmithbot. Development remains on feat/account-language-preferences /
 PR #23; main is not merged. No paid plan was activated.
@@ -7,7 +7,7 @@ PR #23; main is not merged. No paid plan was activated.
 
 Verified bot: @Manjerxbot (Telegram bot ID 7017004595), branded QMRSmithbot | مصنع البوتات.
 Telegram accepted the factory webhook and getWebhookInfo confirmed the exact URL, zero pending
-updates, no delivery error, max_connections=1 and allowed_updates=[message, callback_query].
+updates, no delivery error, max_connections=1 and allowed_updates=[message, callback_query, managed_bot]. Bot Management Mode was subsequently verified enabled.
 Arabic/default and English commands plus profile descriptions were configured.
 
 Public webhook: https://qmrsmithbot-ingress.vercel.app/webhook
@@ -20,7 +20,7 @@ and forwards to the private factory with the Vercel key only in a server-side HT
 No bot token or database credentials are in the ingress service.
 
 Ingress project qmrsmithbot-ingress exposes /health, /webhook and authenticated /bots/{project_id};
-preview deployments retain Vercel Authentication. The main qmrsmithbot project retains its
+It also exposes allowlisted dashboard assets and APIs with application session/tenant authorization (see VISUAL_STUDIO.md); preview deployments retain Vercel Authentication. The main qmrsmithbot project retains its
 original all_except_custom_domains Vercel Authentication, dashboard authentication and tenant
 permissions. The factory is deployed with APP_ENV=production, Telegram sign-in enabled,
 development session bootstrap disabled, PostgreSQL authentication limits enabled and the

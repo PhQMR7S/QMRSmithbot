@@ -263,6 +263,9 @@ class BotManagement:
                         if record is not None and record.enabled and project.active_version:
                             op = 'stop' if project.status == 'running' else 'resume'
                             rows.append([menu.button(op, op + 'ask:' + raw)])
+                        if settings.telegram_ingress_base_url:
+                            rows.append([{'text': tr('🎛 الاستوديو المرئي', '🎛 Visual studio'),
+                                'url':settings.telegram_ingress_base_url.rstrip('/')+'/dashboard?project='+raw}])
                         rows.append([menu.button('back', 'home')])
                         return menu.response(f'🤖 {project.name}\n{connected} · {status}\n\n' + tr('🟠 لديك تغييرات غير منشورة\n' if pending else '🟢 آخر التعديلات منشورة\n', '🟠 Unpublished changes\n' if pending else '🟢 Latest changes published\n')
                             + tr(f'الإصدار المنشور: {project.active_version or "—"}\nآخر مسودة: {version.version}',

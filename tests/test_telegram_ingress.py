@@ -121,3 +121,63 @@ async def test_ingress_reuses_and_closes_lifespan_connection_pool(ingress):
         assert not client.is_closed
     assert client.is_closed
     assert not hasattr(ingress.app.state, 'upstream')
+
+
+@pytest.mark.asyncio
+async def test_dashboard_proxy_is_allowlisted_and_preserves_application_auth(ingress):
+    seen=[]
+    class Client:
+        async def request(self,method,url,**kwargs):
+            seen.append((method,url,kwargs))
+            return httpx.Response(200,json={'items':[]},headers={'Set-Cookie':'must-not-escape','Location':'https://wrong.example'})
+    async def override():
+        yield Client()
+    ingress.app.dependency_overrides[ingress.upstream_client]=override
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=ingress.app),base_url='https://test') as client:
+        assert (await client.get('/api/v1/projects')).status_code==401
+        assert (await client.get('/api/v1/auth/dev/bootstrap',headers={'Authorization':'Bearer sample-session'})).status_code==404
+        assert (await client.post('/api/v1/factory/webhook')).status_code==404
+        assert (await client.get('/api/v1/projects?token=not-allowed',headers={'Authorization':'Bearer sample-session'})).status_code==400
+        assert (await client.post('/api/v1/auth/telegram/start',headers={'Origin':'https://evil.example'})).status_code==403
+        result=await client.get('/api/v1/projects?limit=20',headers={
+            'Authorization':'Bearer sample-session','X-QMRSmith-Tenant-ID':'tenant','x-vercel-protection-bypass':'attacker'})
+    assert result.status_code==200 and result.json()=={'items':[]}
+    assert 'set-cookie' not in result.headers and 'location' not in result.headers
+    assert len(seen)==1
+    _,url,request=seen[0]
+    assert url=='https://private-factory.vercel.app/api/v1/projects'
+    assert request['headers']['Authorization']=='Bearer sample-session'
+    assert request['headers']['X-QMRSmith-Tenant-ID']=='tenant'
+    assert request['headers']['x-vercel-protection-bypass']=='B'*32
+    assert 'B'*32 not in result.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status,content_type',[(302,'text/html'),(500,'application/json'),(200,'text/html')])
+async def test_dashboard_api_never_relays_redirects_or_html_errors(ingress,status,content_type):
+    class Client:
+        async def request(self,*args,**kwargs):
+            return httpx.Response(status,content='sensitive exception',headers={'Content-Type':content_type})
+    async def override():
+        yield Client()
+    ingress.app.dependency_overrides[ingress.upstream_client]=override
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=ingress.app),base_url='https://test') as client:
+        result=await client.get('/api/v1/projects',headers={'Authorization':'Bearer sample-session'})
+    assert result.status_code==503 and 'sensitive' not in result.text
+
+
+@pytest.mark.asyncio
+async def test_dashboard_pages_have_strict_asset_paths_and_bounded_bodies(ingress):
+    class Client:
+        async def request(self,*args,**kwargs):
+            return httpx.Response(200,content='<html>Sign in</html>',headers={
+                'Content-Type':'text/html','Content-Security-Policy':"default-src 'self'"})
+    async def override():
+        yield Client()
+    ingress.app.dependency_overrides[ingress.upstream_client]=override
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=ingress.app),base_url='https://test') as client:
+        result=await client.get('/dashboard')
+        assert result.status_code==200 and result.headers['content-security-policy']=="default-src 'self'"
+        assert result.headers['cache-control']=='no-store'
+        assert (await client.get('/dashboard/assets/config.py')).status_code==404
+        assert (await client.post('/api/v1/auth/telegram/finish',content=b'x'*(ingress.MAX_BODY+1),headers={'Content-Type':'application/json'})).status_code==413

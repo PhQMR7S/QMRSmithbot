@@ -2,3 +2,9 @@ export const labels={ar:{brand:'مصنع البوتات',projects:'مشاريع�
 
 Object.assign(labels.ar,{signinUnavailable:'تسجيل الدخول قيد التجهيز. يرجى المحاولة لاحقًا.',telegramLogin:'الدخول عبر تيليجرام',telegramInstructions:'افتح بوت المصنع وأرسل الرمز أدناه، ثم ارجع إلى هذه الصفحة وأكمل الدخول. الطلب صالح لخمس دقائق.',verificationLabel:'رمز التحقق',openTelegram:'فتح بوت المصنع',completeLogin:'إكمال الدخول',cancelLogin:'إلغاء الطلب',loginPending:'بانتظار إدخال الرمز في بوت المصنع. أكمل التأكيد ثم حاول مجددًا.',loginExpired:'انتهت صلاحية الطلب. ابدأ تسجيل دخول جديدًا.'});
 Object.assign(labels.en,{signinUnavailable:'Sign-in is being prepared. Please try again later.',telegramLogin:'Sign in with Telegram',telegramInstructions:'Open the factory bot and send the code below. Return here to complete sign-in. Requests expire in five minutes.',verificationLabel:'Verification code',openTelegram:'Open factory bot',completeLogin:'Complete sign-in',cancelLogin:'Cancel request',loginPending:'Waiting for the code in the factory bot. Confirm it and try again.',loginExpired:'This request expired. Start a new sign-in.'});
+
+Object.assign(labels.ar,{studio:'استوديو البوت',studioSubtitle:'صمّم المحتوى والأزرار وعاين مسودتك قبل النشر.'});
+Object.assign(labels.en,{studio:'Bot studio',studioSubtitle:'Design content and buttons. Preview your draft before publication.'});
+
+Object.assign(labels.ar,{publishInFactory:'فتح لوحة النشر في المصنع',nativePublishInfo:'انشر من لوحة البوت حتى تُنشر الأزرار والملفات ويُتحقق من اتصال تيليجرام معًا.',created:'تم إنشاء المسودة. افتح استوديو البوت لتعديلها ومعاينتها.'});
+Object.assign(labels.en,{publishInFactory:'Open publishing panel in factory',nativePublishInfo:'Publish from the bot panel to publish buttons and files together and verify the Telegram connection.',created:'Draft created. Open Bot studio to edit and preview it.'});
