@@ -76,12 +76,19 @@ async def process_inline_update(session, project_id, update):
     project = await session.scalar(select(BotProjectRecord).where(
         BotProjectRecord.id == project_id).with_for_update())
     state = await session.get(TelegramInlineBotRecord, project_id)
-    if project is not None and project.status == 'stopped':
-        return None
-    if (project is None or state is None or not state.enabled or project.status != 'running'
+    if (project is None or state is None or not state.enabled or project.status not in ('running','stopped')
             or project.telegram_bot_id is None or project.active_version is None):
         raise InlineBotError('Runtime activation is incomplete')
     cached = await session.get(TelegramInlineUpdateRecord, (project_id, update.update_id))
+    from qmrsmithbot.telegram.child_control import add_owner_entry, child_control
+    handled, response = await child_control(session,project,update,cached)
+    if handled:
+        if cached is None:
+            session.add(TelegramInlineUpdateRecord(project_id=project_id, update_id=update.update_id, response=response))
+            await session.flush()
+        return response
+    if project.status == 'stopped':
+        return None
     if cached is not None:
         return cached.response
     version = await session.scalar(select(WorkflowVersionRecord).where(
@@ -94,12 +101,14 @@ async def process_inline_update(session, project_id, update):
     if program.kind == 'form':
         from qmrsmithbot.forms.runtime import form_response
         response = await form_response(session, project, program, update)
+        response = await add_owner_entry(session,project,update,response)
         session.add(TelegramInlineUpdateRecord(project_id=project_id, update_id=update.update_id, response=response))
         await session.flush()
         return response
     if program.kind in ('buttons', 'contact'):
         from qmrsmithbot.telegram.product_runtime import product_response
         response = await product_response(session, project, program, update)
+        response = await add_owner_entry(session,project,update,response)
         session.add(TelegramInlineUpdateRecord(project_id=project_id, update_id=update.update_id, response=response))
         await session.flush()
         return response
@@ -110,6 +119,7 @@ async def process_inline_update(session, project_id, update):
         text = program.commands.get(event.command) if event.kind == 'command' else program.messages.get(event.text)
         if text is not None:
             response = {'method': 'sendMessage', 'chat_id': message.chat.id, 'text': text}
+    response = await add_owner_entry(session,project,update,response)
     session.add(TelegramInlineUpdateRecord(project_id=project_id, update_id=update.update_id,
                                            response=response))
     await session.flush()

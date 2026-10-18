@@ -129,8 +129,8 @@ async def buttons_response(session, project, program, message, actor_id, is_owne
         if state is None:
             state = BotOwnerStateRecord(project_id=project.id)
             session.add(state)
-        state.data = {'upload': str(item_id)}
-        return say(actor_id, '📎 أرسل الملف أو الصورة أو الفيديو أو الصوت هنا. سيُحفظ لهذا الزر كمسودة؛ بعدها انشر التعديلات من المصنع. /cancel للإلغاء.')
+        state.data = {**(state.data or {}), 'upload': str(item_id), 'control': {'step':'idle','data':{}}}
+        return say(actor_id, '📎 أرسل الملف أو الصورة أو الفيديو أو الصوت هنا. سيُحفظ لهذا الزر كمسودة؛ بعدها افتح /admin وانشر التعديلات. /cancel للإلغاء.')
     if is_owner:
         state = await session.get(BotOwnerStateRecord, project.id)
         if text == '/cancel' and state:
@@ -143,12 +143,12 @@ async def buttons_response(session, project, program, message, actor_id, is_owne
             file = file_reference(message)
             if item is None:
                 state.data = {}
-                return say(actor_id, 'الزر غير متاح. ارجع للمصنع واختر زر الملف مجددًا.')
+                return say(actor_id, 'الزر غير متاح. افتح /admin واختر زر الملف مجددًا.')
             if file is None:
                 return say(actor_id, 'أرسل ملفًا أو صورة أو فيديو أو صوتًا أو ملصقًا، أو /cancel.')
             item.draft = {**item.draft, **file}
             state.data = {}
-            return say(actor_id, '✅ استلمت الملف داخل بوتك. ارجع للمصنع واضغط نشر لتطبيقه على الزوار.')
+            return say(actor_id, '✅ استلمت الملف داخل بوتك. افتح /admin واضغط نشر لتطبيقه على الزوار.')
     parent_id, offset = None, 0
     selected = None
     if callback:

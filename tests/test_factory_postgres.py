@@ -896,3 +896,54 @@ async def test_button_design_order_and_rows_do_not_change_live_until_publish(fac
         items=(await session.scalars(select(FactoryButtonRecord).where(
             FactoryButtonRecord.project_id==project_id).order_by(order_expression()))).all()
         assert [item.id for item in items]==[second,first]
+
+
+@pytest.mark.asyncio
+async def test_child_owner_panel_edit_isolation_visitor_denial_and_resume(factory_database,monkeypatch):
+    from qmrsmithbot.db.factory_models import BotOwnerStateRecord, FactoryConversationRecord
+    from qmrsmithbot.telegram.inline_runtime import process_inline_update
+
+    project_id,_,launch,deliver=await create_product_bot(factory_database,monkeypatch,'buttons')
+    _,sessions,_,owner,_=factory_database
+    await launch()
+    visitor=owner+100
+    start,_=await deliver(text='/start')
+    assert any(b.get('callback_data','').startswith('ca:') for row in start['reply_markup']['inline_keyboard'] for b in row)
+    outsider,_=await deliver(text='/admin',actor=visitor)
+    assert outsider is None
+    forged,_=await deliver(callback='ca:project:'+str(project_id),actor=visitor)
+    assert forged is None
+    panel,_=await deliver(text='/admin')
+    assert panel['chat_id']==owner
+    assert 'مسار تجهيز' in panel['text']
+    assert not any('projects:' in b.get('callback_data','') for row in panel['reply_markup']['inline_keyboard'] for b in row)
+    await deliver(callback='ca:welcome:'+str(project_id))
+    # Editing this bot does not touch the factory conversation.
+    async with sessions() as session:
+        user_id=await session.scalar(select(IdentityRecord.user_id).where(IdentityRecord.provider=='telegram',IdentityRecord.subject==str(owner)))
+        state=await session.get(FactoryConversationRecord,user_id)
+        before=state.step,state.data
+    saved,parsed=await deliver(text='Welcome edited inside child')
+    assert 'مسودة' in saved['text']
+    async with sessions() as session,session.begin():
+        assert await process_inline_update(session,project_id,parsed)==saved
+        state=await session.get(FactoryConversationRecord,user_id)
+        assert (state.step,state.data)==before
+        own=await session.get(BotOwnerStateRecord,project_id)
+        assert own.data['control']['step']=='idle'
+    await deliver(callback='ca:project:'+str(project_id))
+    ask,_=await deliver(callback='ca:pause')
+    apply=ask['reply_markup']['inline_keyboard'][0][0]['callback_data']
+    await deliver(callback=apply)
+    ignored,_=await deliver(text='/start',actor=visitor)
+    assert ignored is None
+    stopped,_=await deliver(text='/admin')
+    assert 'متوقف' in stopped['text']
+    ask,_=await deliver(callback='ca:resume')
+    await deliver(callback=ask['reply_markup']['inline_keyboard'][0][0]['callback_data'])
+    again,_=await deliver(text='/start',actor=visitor)
+    assert again['text']=='Product welcome'  # Draft was not published.
+    rejected,_=await deliver(callback='ca:welcome:'+str(uuid4()))
+    assert 'غير متاح' in rejected['text']
+    closed,_=await deliver(callback='ca:exit')
+    assert '/start' in closed['text']

@@ -280,6 +280,14 @@ class BotManagement:
                         return await prepare_creation(self, menu, project)
                     if action == 'project':
                         await self.store.save_state(MenuState('idle', {}))
+                        if project.active_version and project.telegram_username and not getattr(self.store,'child_control',False):
+                            return menu.response(tr('إدارة البوت داخل البوت نفسه\n\n','Manage this bot inside its own chat\n\n')+project.name+tr(
+                                '\n\nلوحة المحتوى والأزرار والنشر والإيقاف موجودة الآن داخل بوتك. افتحه من الزر أدناه؛ لا تظهر أدوات الإدارة إلا لصاحبه. يبقى ربط التوكن في المصنع.',
+                                '\n\nContent, buttons, publishing and reception controls now live in your bot. Open it below; only its owner can access management. Token binding remains in the factory.'),
+                                [[{'text':tr('فتح لوحة تحكم البوت','Open this bot’s control panel'),
+                                   'url':'https://t.me/'+project.telegram_username+'?start=admin'}],
+                                 [button('الاتصال والتوكن','Connection & token','connection:'+raw)],
+                                 [menu.button('back','home')]])
                         version = await self.latest(project_id)
                         record = await self.session.get(TelegramInlineBotRecord, project_id)
                         pending = version.version != project.active_version
