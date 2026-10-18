@@ -18,7 +18,7 @@ class FakeResult:
 
 
 class FakeSession:
-    def __init__(self, fail=False, revision="20261017_05"):
+    def __init__(self, fail=False, revision="20261018_06"):
         self.fail = fail
         self.revision = revision
 
@@ -38,10 +38,10 @@ class FakeSession:
 @pytest.mark.parametrize(
     ("fail", "revision", "expected"),
     [
-        (False, "20261017_05", 200),
+        (False, "20261018_06", 200),
         (False, "0007", 503),
         (False, None, 503),
-        (True, "20261017_05", 503),
+        (True, "20261018_06", 503),
     ],
 )
 async def test_readiness_verifies_database_and_does_not_expose_errors(

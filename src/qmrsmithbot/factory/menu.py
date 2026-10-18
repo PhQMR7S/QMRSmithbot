@@ -139,7 +139,7 @@ class FactoryMenu:
             return await self.review(dict(state.data))
         if callback == 'create':
             await self.save_state(MenuState('idle', {}))
-            descriptions = ('🗂 أزرار: أقسام، نصوص، روابط وملفات\n✉️ تواصل: رسائل الزوار والرد عليهم\n\nقوالب إضافية\nترحيب بسيط برسالة بداية جاهزة\nردود نصية لعبارات يرسلها الزائر\nأوامر مثل /help مع ردود مخصصة' if self.lang == 'ar' else '🗂 Buttons: sections, text, links and files\n✉️ Contact: visitor messages and owner replies\n\nMore templates\nWelcome: a start message\nText replies: respond to exact phrases\nCommands: custom /help-style replies')
+            descriptions = ('🗂 أزرار: أقسام، نصوص، روابط وملفات\n✉️ تواصل: رسائل الزوار والرد عليهم\nنماذج: أسئلة متسلسلة، خيارات وتفرعات\n\nقوالب إضافية\nترحيب بسيط برسالة بداية جاهزة\nردود نصية لعبارات يرسلها الزائر\nأوامر مثل /help مع ردود مخصصة' if self.lang == 'ar' else '🗂 Buttons: sections, text, links and files\n✉️ Contact: visitor messages and owner replies\nForms: questions, choices and branching\n\nMore templates\nWelcome: a start message\nText replies: respond to exact phrases\nCommands: custom /help-style replies')
             return self.response('✦ ' + self.text('choose') + '\n\n' + descriptions, [[{'text': t.title_ar if self.lang == 'ar' else t.title_en,
                                    'callback_data': 'template:' + t.id}] for t in CATALOG]
                                  + [[self.button('back', 'home')]])
@@ -222,7 +222,7 @@ class FactoryMenu:
             return await self.wizard_prompt('welcome')
         if state.step == 'welcome' and 0 < len(text.strip()) <= 3000:
             data['options'] = {**data.get('options', {}), 'language_code': self.lang, 'welcome': text}
-            if data['template'] not in ('welcome', 'buttons', 'contact'):
+            if data['template'] not in ('welcome', 'buttons', 'contact', 'form'):
                 if data['options'].get('rules'):
                     return await self.review(data)
                 data['options']['rules'] = []

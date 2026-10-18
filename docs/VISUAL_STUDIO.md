@@ -21,7 +21,7 @@ Reviewed on 2026-10-18:
 - laser54/telegram-managed-bot-factory: owner-confirmed creation and explicit reconciliation boundaries; the existing managed bot flow remains in use.
 - aiogram: retained as the existing Bot API framework.
 
-This implementation is original. No source files, assets, components or dependencies were copied from these projects; no third-party license is being substituted. Their advertised capabilities are references, not claims that every feature is now implemented here. A general flow canvas, conditions/delays, campaign broadcasting, payment processing and a Mini App runtime remain outside this studio release.
+This implementation is original. No source files, assets, components or dependencies were copied from these projects; no third-party license is being substituted. Their advertised capabilities are references, not claims that every feature is now implemented here. The subsequent form template adds ordered questions, forward choice branches and an owner-only inbox (see FORM_BUILDER.md). A general flow canvas, arbitrary condition expressions/delays, campaign broadcasting, payment processing and a Mini App runtime remain outside these studio releases.
 
 ## Verification
 

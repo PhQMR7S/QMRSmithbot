@@ -37,11 +37,11 @@ class Template:
     category: str
     title_ar: str
     title_en: str
-    mode: Literal['welcome', 'message', 'command', 'buttons', 'contact']
+    mode: Literal['welcome', 'message', 'command', 'buttons', 'contact', 'form']
     version: int = 1
 
     def build(self, options: TemplateOptions) -> WorkflowDefinition:
-        if self.mode in ('welcome', 'buttons', 'contact') and options.rules:
+        if self.mode in ('welcome', 'buttons', 'contact', 'form') and options.rules:
             raise ValueError('Welcome template does not accept reply rules')
         if self.mode in ('message', 'command') and not options.rules:
             raise ValueError('This template requires at least one reply rule')
@@ -64,13 +64,18 @@ class Template:
                 {'id': f'reply_{index}', 'type': 'action.message', 'config': {'text': rule.response}},
             ])
             edges.append({'source': node_id, 'target': f'reply_{index}'})
+        variables = {'factory_kind': self.mode} if self.mode in ('buttons', 'contact') else {}
+        if self.mode == 'form':
+            from qmrsmithbot.forms.schema import default_form
+            variables = {'factory_kind':'form','form':default_form(options.language_code).model_dump(mode='json')}
         return WorkflowDefinition.model_validate({'nodes': nodes, 'edges': edges,
-            'variables': {'factory_kind': self.mode} if self.mode in ('buttons', 'contact') else {}})
+            'variables': variables})
 
 
 CATALOG = (
     Template('buttons', 'menus', '🗂 بوت أزرار وملفات', '🗂 Buttons & files bot', 'buttons'),
     Template('contact', 'communication', '✉️ بوت تواصل', '✉️ Contact bot', 'contact'),
+    Template('form', 'forms', 'نماذج وأسئلة متفرعة', 'Forms & branching questions', 'form'),
     Template('welcome', 'communication', 'بوت ترحيب', 'Welcome bot', 'welcome'),
     Template('auto-replies', 'communication', 'ردود نصية تلقائية', 'Text auto replies', 'message'),
     Template('command-menu', 'utilities', 'قائمة أوامر', 'Command menu', 'command'),

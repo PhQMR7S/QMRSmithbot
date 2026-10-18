@@ -1,3 +1,4 @@
+import { FormEditor } from "./forms.js";
 const copy = {
   ar: {
     studio: "استوديو البوت",
@@ -169,7 +170,12 @@ export class Studio {
     return copy[this.language()][key] || key;
   }
   isDirty() {
-    return this.dirty || this.welcomeDirty || this.working;
+    return (
+      this.dirty ||
+      this.welcomeDirty ||
+      this.working ||
+      Boolean(this.formEditor?.isDirty())
+    );
   }
   canLeave() {
     return (
@@ -178,6 +184,7 @@ export class Studio {
   }
   close() {
     this.epoch++;
+    this.formEditor = null;
     this.root.replaceChildren();
     this.root.inert = false;
     this.root.classList.remove("studio-busy", "studio-preview-mode");
@@ -313,8 +320,14 @@ export class Studio {
     this.root.append(grid);
     const workspace = node("div", undefined, "studio-workspace");
     grid.append(workspace);
-    const intro = node("section", undefined, "studio-card");
-    intro.append(node("h3", this.t("welcome")));
+    const intro = node(
+      this.data.kind === "form" ? "details" : "section",
+      undefined,
+      "studio-card",
+    );
+    intro.append(
+      node(this.data.kind === "form" ? "summary" : "h3", this.t("welcome")),
+    );
     this.welcome = node("textarea");
     this.welcome.setAttribute("aria-label", this.t("welcome"));
     this.welcome.maxLength = 3000;
@@ -340,6 +353,7 @@ export class Studio {
               },
             );
             this.data = data;
+            if (this.formEditor) this.formEditor.data = data;
             this.versionBadge.textContent =
               this.t("version") +
               " " +
@@ -399,7 +413,7 @@ export class Studio {
       this.editor = node("section", undefined, "studio-card studio-editor");
       this.editor.append(node("p", this.t("choose")));
       workspace.append(this.editor);
-    } else {
+    } else if (this.data.kind !== "form") {
       workspace.append(
         node("p", this.t(this.data.kind === "contact" ? "contact" : "plain")),
       );
@@ -430,6 +444,35 @@ export class Studio {
     phone.append(this.previewButtons);
     preview.append(phone);
     grid.append(preview);
+    if (this.data.kind === "form") {
+      const formRoot = node("section");
+      workspace.append(formRoot);
+      this.formEditor = new FormEditor({
+        root: formRoot,
+        request: (path, options) => this.request(path, options),
+        projectId: this.project.id,
+        data: this.data,
+        language: () => this.language(),
+        button: (...args) => this.button(...args),
+        run: (action) => this.run(action),
+        saved: (data) => {
+          this.data = data;
+          this.versionBadge.textContent =
+            this.t("version") +
+            " " +
+            data.version +
+            " · " +
+            this.t("published") +
+            " " +
+            (data.active_version ?? "—");
+          this.versionLabel.textContent =
+            this.t("saved") + " · " + this.t("publishNote");
+        },
+        welcome: () => this.welcome.value,
+        previewMessage: this.previewMessage,
+        previewButtons: this.previewButtons,
+      });
+    }
   }
   async load() {
     const epoch = this.epoch,
@@ -528,12 +571,18 @@ export class Studio {
         const b = this.button(this.t(key), changePage);
         b.disabled = disabled;
         this.pager.append(b);
-        if (!disabled) this.previewButtons.append(this.button(this.t(key), changePage));
+        if (!disabled)
+          this.previewButtons.append(this.button(this.t(key), changePage));
       }
       if (this.parent) {
         const parentTrail = this.trail.slice(0, -1);
-        this.previewButtons.append(this.button(parentTrail.at(-1)?.title || this.t("root"),
-          () => this.navigate(parentTrail.at(-1)?.id || null, parentTrail), "back"));
+        this.previewButtons.append(
+          this.button(
+            parentTrail.at(-1)?.title || this.t("root"),
+            () => this.navigate(parentTrail.at(-1)?.id || null, parentTrail),
+            "back",
+          ),
+        );
       }
       this.previewMessage.textContent = this.parent
         ? data.folder?.title || this.data.welcome

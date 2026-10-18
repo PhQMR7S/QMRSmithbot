@@ -2,6 +2,7 @@
 import hashlib
 import json
 import re
+from copy import deepcopy
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -12,12 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmrsmithbot.api.dependencies import get_current_principal, get_current_tenant_id
 from qmrsmithbot.auth.models import Permission, Principal
-from qmrsmithbot.db.factory_models import FactoryButtonRecord
+from qmrsmithbot.db.factory_models import BotFormSubmissionRecord, FactoryButtonRecord
 from qmrsmithbot.db.models import User
 from qmrsmithbot.db.session import get_session
 from qmrsmithbot.factory.bot_management import BotManagement
 from qmrsmithbot.factory.button_editor import ButtonEditor
 from qmrsmithbot.factory.store import SQLFactoryStore
+from qmrsmithbot.forms.schema import Form
 from qmrsmithbot.telegram.inline_runtime import InlineBotError, compile_text_program
 
 router = APIRouter(prefix='/api/v1/projects/{project_id}/studio', tags=['studio'])
@@ -27,6 +29,12 @@ class WelcomeDraft(BaseModel):
     model_config = ConfigDict(extra='forbid')
     version: int = Field(ge=1)
     welcome: str = Field(min_length=1, max_length=3000)
+
+
+class FormDraft(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    version: int = Field(ge=1)
+    form: Form
 
 
 class ButtonDraft(BaseModel):
@@ -96,7 +104,7 @@ class Studio:
         return {'id':str(project.id), 'name':project.name, 'kind':program.kind,
             'version':version.version, 'active_version':project.active_version,
             'welcome':program.commands.get('start', ''), 'username':project.telegram_username,
-            'status':project.status, 'commands':len(program.commands)-1, 'replies':len(program.messages)}
+            'status':project.status, 'form':program.form.model_dump(mode='json') if program.form else None, 'commands':len(program.commands)-1, 'replies':len(program.messages)}
 
     async def save_welcome(self, project_id, payload):
         _, version, _ = await self.project(project_id, True)
@@ -106,6 +114,51 @@ class Studio:
             raise HTTPException(422, 'Invalid welcome text')
         await self.manager.save_content(project_id, welcome=payload.welcome)
         return await self.overview(project_id)
+
+    async def save_form(self, project_id, payload):
+        _, version, program = await self.project(project_id, True)
+        if program.kind != 'form':
+            raise HTTPException(409, 'This is not a form bot')
+        if version.version != payload.version:
+            raise HTTPException(409, 'The draft changed. Reload before saving.')
+        raw = payload.form.model_dump(mode='json')
+        if re.search(r'\b[0-9]{5,16}:[A-Za-z0-9_-]{20,}\b',json.dumps(raw)):
+            raise HTTPException(422, 'Credentials cannot be included in a form')
+        definition=deepcopy(version.definition)
+        definition['variables']={'factory_kind':'form','form':raw}
+        compile_text_program(definition)
+        await self.manager.store.projects_service.save_version(project_id=project_id,
+            tenant_id=self.manager.store.tenant_id,definition=definition)
+        await self.manager.store.audit('factory.form.saved',project_id,
+            self.manager.store.user.id,self.manager.store.tenant_id)
+        return await self.overview(project_id)
+
+    async def submissions_owner(self, project_id, write=False):
+        project, _, program=await self.project(project_id,write)
+        if program.kind!='form':
+            raise HTTPException(409, 'This is not a form bot')
+        if project.owner_id!=self.manager.store.user.id:
+            raise HTTPException(403, 'Only the project owner may access submitted answers')
+        return project
+
+    async def submissions(self, project_id, offset):
+        await self.submissions_owner(project_id)
+        records=(await self.session.scalars(select(BotFormSubmissionRecord).where(
+            BotFormSubmissionRecord.project_id==project_id).order_by(
+                BotFormSubmissionRecord.created_at.desc(),BotFormSubmissionRecord.id.desc()).offset(offset).limit(6))).all()
+        return {'items':[{'id':str(r.id),'visitor_id':r.visitor_id,'version':r.version,
+            'created_at':r.created_at.isoformat(),'data':r.data} for r in records[:5]],'has_more':len(records)>5}
+
+    async def delete_submission(self, project_id, submission_id):
+        await self.submissions_owner(project_id,True)
+        record=await self.session.scalar(select(BotFormSubmissionRecord).where(
+            BotFormSubmissionRecord.id==submission_id,BotFormSubmissionRecord.project_id==project_id))
+        if record is None:
+            raise HTTPException(404, 'Submission is unavailable')
+        await self.session.delete(record)
+        await self.manager.store.audit('factory.form.submission_deleted',project_id,
+            self.manager.store.user.id,self.manager.store.tenant_id)
+        return {'deleted':True}
 
     async def buttons_project(self, project_id, write=False):
         project, _, program = await self.project(project_id, write)
@@ -217,3 +270,19 @@ async def studio_save_button(project_id: UUID, item_id: UUID, payload: ButtonDra
 @router.post('/buttons/{item_id}/delete')
 async def studio_delete_button(project_id: UUID, item_id: UUID, payload: Revision, studio: StudioDependency):
     return await studio.delete_button(project_id, item_id, payload)
+
+
+@router.put('/form')
+async def studio_save_form(project_id: UUID, payload: FormDraft, studio: StudioDependency):
+    return await studio.save_form(project_id, payload)
+
+
+@router.get('/submissions')
+async def studio_submissions(project_id: UUID, studio: StudioDependency,
+    offset: int = Query(default=0, ge=0, le=2**31-1)):
+    return await studio.submissions(project_id, offset)
+
+
+@router.post('/submissions/{submission_id}/delete')
+async def studio_delete_submission(project_id: UUID, submission_id: UUID, studio: StudioDependency):
+    return await studio.delete_submission(project_id, submission_id)

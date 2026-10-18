@@ -7,6 +7,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -96,3 +97,22 @@ class ContactBlockRecord(Base):
     project_id: Mapped[UUID] = mapped_column(ForeignKey('bot_projects.id', ondelete='CASCADE'), primary_key=True)
     visitor_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class BotFormSessionRecord(Base):
+    __tablename__ = 'bot_form_sessions'
+    project_id: Mapped[UUID] = mapped_column(ForeignKey('bot_projects.id', ondelete='CASCADE'), primary_key=True)
+    visitor_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class BotFormSubmissionRecord(Base):
+    __tablename__ = 'bot_form_submissions'
+    __table_args__ = (Index('ix_bot_form_submissions_project_created', 'project_id', 'created_at', 'id'),)
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    project_id: Mapped[UUID] = mapped_column(ForeignKey('bot_projects.id', ondelete='CASCADE'), nullable=False, index=True)
+    visitor_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

@@ -196,6 +196,10 @@ class BotManagement:
             return [button('↩ لوحة البوت', '↩ Bot panel', 'project:' + str(project_id))]
         state = await self.store.state()
         try:
+            from qmrsmithbot.factory.form_manager import FormManager
+            form_response = await FormManager(self, menu).handle(callback)
+            if form_response is not None:
+                return form_response
             buttons = await ButtonEditor(self, menu).handle(text=text, callback=callback)
             if buttons is not None:
                 return buttons
@@ -258,6 +262,8 @@ class BotManagement:
                                  button('⚙️ الإعدادات', '⚙️ Settings', 'botsettings:' + raw)]]
                         if program.kind == 'buttons':
                             rows[0] = [button('🗂 مصمم الأزرار والملفات', '🗂 Buttons & files designer', 'buttons:' + raw)]
+                        elif program.kind == 'form':
+                            rows[0] = [button('إدارة النموذج والإجابات', 'Form & submissions', 'formsetup:' + raw)]
                         elif program.kind == 'contact':
                             rows[0] = [button('✉️ إدارة التواصل', '✉️ Contact setup', 'contactsetup:' + raw)]
                         if record is not None and record.enabled and project.active_version:

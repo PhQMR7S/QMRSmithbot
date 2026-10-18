@@ -50,3 +50,5 @@ Advanced workflow actions (HTTP, delays, branching, variables and action chains)
 See `docs/BUTTONS_AND_CONTACT.md` and `docs/INLINE_TEXT_RUNTIME.md` for runtime boundaries, setup and retry semantics.
 
 Read `docs/DASHBOARD.md`, `docs/TEMPLATES.md`, `docs/PROJECT_MANAGEMENT.md`, `docs/TELEGRAM_FACTORY.md` and `docs/VERCEL_DEPLOYMENT.md` for functionality, prerequisites and validation limits.
+
+The form template supports text, numeric and choice questions with forward branches, version-frozen visitor sessions and an owner-only submissions inbox. See [Form builder](docs/FORM_BUILDER.md).

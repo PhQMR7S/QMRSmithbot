@@ -692,3 +692,124 @@ async def test_studio_shares_native_drafts_scopes_items_and_detects_stale_writes
     finally:
         for dep in (get_session,get_current_principal,get_current_tenant_id):
             app.dependency_overrides.pop(dep,None)
+
+
+@pytest.mark.asyncio
+async def test_forms_branching_frozen_sessions_duplicates_and_owner_only_inbox(factory_database,monkeypatch):
+    from copy import deepcopy
+    from datetime import UTC, datetime, timedelta
+
+    from qmrsmithbot.api.app import app
+    from qmrsmithbot.api.dependencies import get_current_principal, get_current_tenant_id
+    from qmrsmithbot.auth.models import Principal
+    from qmrsmithbot.db.factory_models import BotFormSessionRecord, BotFormSubmissionRecord
+    from qmrsmithbot.db.models import TenantMembershipRecord
+    from qmrsmithbot.db.session import get_session
+    from qmrsmithbot.telegram.inline_runtime import process_inline_update
+
+    processor,sessions,update,actor_id,_=factory_database
+    project_id,_,launch,deliver=await create_product_bot(factory_database,monkeypatch,'form')
+    async with sessions() as session:
+        project=await session.get(BotProjectRecord,project_id)
+        owner_id,tenant_id=project.owner_id,project.tenant_id
+    editor_id=int(uuid4().hex[:12],16)+10**12
+    async with sessions() as session,session.begin():
+        session.add(User(id=editor_id,first_name='Form editor',language_code='ar'))
+        await session.flush()
+        session.add(TenantMembershipRecord(tenant_id=tenant_id,user_id=editor_id,role='editor'))
+    current_user=[owner_id]
+    async def session_override():
+        async with sessions() as session,session.begin():
+            yield session
+    app.dependency_overrides[get_session]=session_override
+    app.dependency_overrides[get_current_principal]=lambda:Principal(current_user[0],uuid4())
+    app.dependency_overrides[get_current_tenant_id]=lambda:tenant_id
+    prefix=f'/api/v1/projects/{project_id}/studio'
+    form={'title':'طلب التسجيل','completion':'تم حفظ الطلب القديم','questions':[
+        {'id':'purpose','prompt':'نوع الطلب؟','kind':'choice','choices':[
+            {'label':'تسجيل','next':'age'},{'label':'انتهاء','next':'end'}]},
+        {'id':'name','prompt':'الاسم؟','required':False},
+        {'id':'age','prompt':'العمر القديم؟','kind':'number','minimum':18,'maximum':90}]}
+    def callback(result,index=0):
+        return result['reply_markup']['inline_keyboard'][index][0]['callback_data']
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='https://test') as client:
+            initial=(await client.get(prefix)).json()
+            saved=await client.put(prefix+'/form',json={'version':initial['version'],'form':form})
+            assert saved.status_code==200
+            old_version=saved.json()['version']
+            assert (await client.put(prefix+'/form',json={'version':initial['version'],'form':form})).status_code==409
+            await launch()
+            visitor=actor_id+100
+            start,_=await deliver(text='/start',actor=visitor)
+            stale_start=callback(start)
+            question,_=await deliver(callback=stale_start,actor=visitor)
+            old_choice=callback(question)
+            age,_=await deliver(callback=old_choice,actor=visitor)
+            assert 'العمر القديم' in age['text'] and 'الاسم' not in age['text']
+            replay,_=await deliver(callback=old_choice,actor=visitor)
+            assert 'لا يخص السؤال' in replay['text']
+            invalid,_=await deliver(text='17',actor=visitor)
+            assert '18' in invalid['text']
+            changed=deepcopy(form)
+            changed['questions'][2]['prompt']='العمر الجديد؟'
+            changed['completion']='تم حفظ الطلب الجديد'
+            assert (await client.put(prefix+'/form',json={'version':old_version,'form':changed})).status_code==200
+            await launch()
+            still_old,_=await deliver(text='/start',actor=visitor)
+            assert 'العمر القديم' in still_old['text'] and 'العمر الجديد' not in still_old['text']
+            completed,parsed=await deliver(text='٢٣',actor=visitor)
+            assert completed['text']=='تم حفظ الطلب القديم'
+            async def duplicate():
+                async with sessions() as session,session.begin():
+                    return await process_inline_update(session,project_id,parsed)
+            assert await asyncio.gather(duplicate(),duplicate())==[completed,completed]
+            inbox=(await client.get(prefix+'/submissions')).json()
+            assert len(inbox['items'])==1
+            item=inbox['items'][0]
+            assert item['version']==old_version
+            assert [a['question_id'] for a in item['data']['answers']]==['purpose','age']
+            assert item['data']['answers'][1]['answer']=='٢٣'
+            another=visitor+1
+            refused,_=await deliver(callback=stale_start,actor=another)
+            assert 'تحدّث النموذج' in refused['text']
+            new_start,_=await deliver(text='/start',actor=another)
+            new_question,_=await deliver(callback=callback(new_start),actor=another)
+            forged,_=await deliver(callback=old_choice,actor=another)
+            assert 'لا يخص السؤال' in forged['text']
+            final,_=await deliver(callback=callback(new_question,1),actor=another)
+            assert final['text']=='تم حفظ الطلب الجديد'
+            inbox=(await client.get(prefix+'/submissions')).json()
+            assert len(inbox['items'])==2
+            # Editors can edit questions but cannot read/delete completed visitor answers.
+            current_user[0]=editor_id
+            assert (await client.get(prefix)).status_code==200
+            assert (await client.get(prefix+'/submissions')).status_code==403
+            assert (await client.post(prefix+f'/submissions/{item["id"]}/delete')).status_code==403
+            current_user[0]=owner_id
+            assert (await client.get(f'/api/v1/projects/{uuid4()}/studio/submissions')).status_code==404
+            native=await processor.process(update(callback=f'fs:{item["id"]}:1'))
+            assert '٢٣' in native['text']
+            assert (await client.post(prefix+f'/submissions/{item["id"]}/delete')).status_code==200
+            assert len((await client.get(prefix+'/submissions')).json()['items'])==1
+            # Expired and explicitly cancelled sessions never become completed submissions.
+            for extra in (visitor+2,visitor+3):
+                greeting,_=await deliver(text='/start',actor=extra)
+                await deliver(callback=callback(greeting),actor=extra)
+            cancelled,_=await deliver(text='/cancel',actor=visitor+2)
+            assert 'إلغاء' in cancelled['text']
+            async with sessions() as session,session.begin():
+                record=await session.get(BotFormSessionRecord,(project_id,visitor+3))
+                record.expires_at=datetime.now(UTC)-timedelta(seconds=1)
+            expired,_=await deliver(text='تسجيل',actor=visitor+3)
+            assert 'انتهت الجلسة' in expired['text']
+            async with sessions() as session:
+                assert await session.get(BotFormSessionRecord,(project_id,visitor+2)) is None
+                assert await session.get(BotFormSessionRecord,(project_id,visitor+3)) is None
+                assert len((await session.scalars(select(BotFormSubmissionRecord).where(
+                    BotFormSubmissionRecord.project_id==project_id))).all())==1
+    finally:
+        for dependency in (get_session,get_current_principal,get_current_tenant_id):
+            app.dependency_overrides.pop(dependency,None)
+        async with sessions() as session,session.begin():
+            await session.execute(delete(User).where(User.id==editor_id))

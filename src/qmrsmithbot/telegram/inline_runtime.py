@@ -9,6 +9,7 @@ from sqlalchemy import select
 from qmrsmithbot.config import settings
 from qmrsmithbot.db.factory_models import TelegramInlineBotRecord, TelegramInlineUpdateRecord
 from qmrsmithbot.db.models import BotProjectRecord, WorkflowVersionRecord
+from qmrsmithbot.forms.schema import Form
 from qmrsmithbot.telegram.dispatcher import TelegramEventClassifier
 from qmrsmithbot.workflows.schema import WorkflowDefinition
 
@@ -29,11 +30,16 @@ class TextProgram:
     commands: dict[str, str]
     messages: dict[str, str]
     kind: str = "text"
+    form: Form | None = None
 
 
 def compile_text_program(raw):
     definition = WorkflowDefinition.model_validate(raw)
-    if definition.schema_version != 1 or definition.variables not in ({}, {'factory_kind': 'buttons'}, {'factory_kind': 'contact'}):
+    form = None
+    variables = definition.variables
+    if variables.get('factory_kind') == 'form' and set(variables) == {'factory_kind', 'form'}:
+        form = Form.model_validate(variables['form'])
+    if definition.schema_version != 1 or (form is None and variables not in ({}, {'factory_kind': 'buttons'}, {'factory_kind': 'contact'})):
         raise InlineBotError('This workflow needs the advanced runtime')
     nodes = {node.id: node for node in definition.nodes}
     commands, messages, used = {}, {}, set()
@@ -63,7 +69,7 @@ def compile_text_program(raw):
         used.update((node.id, target.id))
     if used != set(nodes) or 'start' not in commands:
         raise InlineBotError('A start reply and connected nodes are required')
-    return TextProgram(commands, messages, definition.variables.get('factory_kind', 'text'))
+    return TextProgram(commands, messages, definition.variables.get('factory_kind', 'text'), form)
 
 
 async def process_inline_update(session, project_id, update):
@@ -85,6 +91,12 @@ async def process_inline_update(session, project_id, update):
     if version is None:
         raise InlineBotError('Published workflow is unavailable')
     program = compile_text_program(version.definition)
+    if program.kind == 'form':
+        from qmrsmithbot.forms.runtime import form_response
+        response = await form_response(session, project, program, update)
+        session.add(TelegramInlineUpdateRecord(project_id=project_id, update_id=update.update_id, response=response))
+        await session.flush()
+        return response
     if program.kind in ('buttons', 'contact'):
         from qmrsmithbot.telegram.product_runtime import product_response
         response = await product_response(session, project, program, update)
