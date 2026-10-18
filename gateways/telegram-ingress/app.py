@@ -130,11 +130,11 @@ def dashboard_api_allowed(method, path):
         return True
     patterns = {
         'GET': [r'/api/v1/me/preferences', r'/api/v1/tenants', r'/api/v1/templates',
-            r'/api/v1/projects', rf'/api/v1/projects/{UUID_PATH}(?:/versions|/studio(?:/buttons)?)?'],
-        'PUT': [r'/api/v1/me/preferences', rf'/api/v1/projects/{UUID_PATH}/studio/buttons/{UUID_PATH}'],
+            r'/api/v1/projects', rf'/api/v1/projects/{UUID_PATH}(?:/versions|/studio(?:/buttons|/submissions)?)?'],
+        'PUT': [rf'/api/v1/projects/{UUID_PATH}/studio/form', r'/api/v1/me/preferences', rf'/api/v1/projects/{UUID_PATH}/studio/buttons/{UUID_PATH}'],
         'PATCH': [rf'/api/v1/projects/{UUID_PATH}(?:/studio)?'],
-        'POST': [r'/api/v1/auth/logout', r'/api/v1/templates/(?:buttons|contact|welcome|auto-replies|command-menu)/projects',
-            rf'/api/v1/projects/{UUID_PATH}/(?:stop|resume|studio/buttons/{UUID_PATH}/delete)'],
+        'POST': [r'/api/v1/auth/logout', r'/api/v1/templates/(?:buttons|contact|form|welcome|auto-replies|command-menu)/projects',
+            rf'/api/v1/projects/{UUID_PATH}/(?:stop|resume|studio/buttons/{UUID_PATH}/delete|studio/submissions/{UUID_PATH}/delete)'],
     }
     return any(re.fullmatch(pattern, path) for pattern in patterns.get(method, []))
 
@@ -143,7 +143,7 @@ def dashboard_api_allowed(method, path):
 @app.api_route('/dashboard/assets/{asset}', methods=['GET'])
 async def dashboard_page(request: Request, client: Annotated[httpx.AsyncClient, Depends(upstream_client)],
     asset: str | None = None):
-    if asset is not None and asset not in {'app.js','api.js','i18n.js','studio.js','style.css'}:
+    if asset is not None and asset not in {'app.js','api.js','i18n.js','studio.js','forms.js','style.css'}:
         raise HTTPException(404, 'Not found', headers=HEADERS)
     return await forward_dashboard(request, client, request.url.path, page=True)
 
