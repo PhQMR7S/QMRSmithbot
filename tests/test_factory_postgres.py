@@ -947,3 +947,41 @@ async def test_child_owner_panel_edit_isolation_visitor_denial_and_resume(factor
     assert 'غير متاح' in rejected['text']
     closed,_=await deliver(callback='ca:exit')
     assert '/start' in closed['text']
+
+
+@pytest.mark.asyncio
+async def test_child_native_form_designer_saves_draft_and_publishes_from_child(factory_database,monkeypatch):
+    from qmrsmithbot.db.models import WorkflowVersionRecord
+    from qmrsmithbot.telegram.inline_runtime import compile_text_program
+
+    project_id,_,launch,deliver=await create_product_bot(factory_database,monkeypatch,'form')
+    _,sessions,_,owner,_=factory_database
+    await launch()
+    root,_=await deliver(text='/admin')
+    assert any(b['callback_data']=='ca:workspace' for row in root['reply_markup']['inline_keyboard'] for b in row)
+    workspace,_=await deliver(callback='ca:workspace')
+    assert any(b['callback_data']=='ca:fe:home' for row in workspace['reply_markup']['inline_keyboard'] for b in row)
+    await deliver(callback='ca:fe:home')
+    async with sessions() as session:
+        version=await session.scalar(select(WorkflowVersionRecord).where(WorkflowVersionRecord.project_id==project_id).order_by(WorkflowVersionRecord.version.desc()).limit(1))
+        previous=version.version
+    await deliver(callback=f'ca:fe:add:{previous}:number')
+    await deliver(text='كم عمرك؟')
+    async with sessions() as session:
+        version=await session.scalar(select(WorkflowVersionRecord).where(WorkflowVersionRecord.project_id==project_id).order_by(WorkflowVersionRecord.version.desc()).limit(1))
+        assert version.version==previous+1
+        assert compile_text_program(version.definition).form.questions[-1].kind=='number'
+        project=await session.get(BotProjectRecord,project_id)
+        assert project.active_version==previous
+    await deliver(callback=f'ca:fe:limits:{previous+1}:2')
+    bad,_=await deliver(text='100 18')
+    assert 'لم يُحفظ' in bad['text']
+    await deliver(text='18 100')
+    await deliver(callback='ca:project:'+str(project_id))
+    ask,_=await deliver(callback='ca:launchask:'+str(project_id))
+    await deliver(callback=ask['reply_markup']['inline_keyboard'][0][0]['callback_data'])
+    async with sessions() as session:
+        project=await session.get(BotProjectRecord,project_id)
+        assert project.active_version==previous+2
+    outsider,_=await deliver(callback='ca:fe:home',actor=owner+1)
+    assert outsider is None

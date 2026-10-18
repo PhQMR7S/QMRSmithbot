@@ -51,7 +51,7 @@ class ChildManagement(BotManagement):
         return await super().latest(project_id)
 
 
-ALLOWED = frozenset(('project','buttons','folder','item','bnew','bl','bedit','btitle','bdel',
+ALLOWED = frozenset(('workspace','delivery','identity','insights','fe','project','buttons','folder','item','bnew','bl','bedit','btitle','bdel',
     'bdelete','bdesign','bd','content','rl','ri','ra','re','rd','ruledeleteok',
     'welcome','preview','simulate','rename','botsettings','profile','health',
     'launchask','launchok','formsetup','forms','fs','fdel','fdelok','contactsetup'))
@@ -83,6 +83,8 @@ def localize_panel(response,project,language):
             visible.append(button)
         if visible:
             rows.append(visible)
+    if any(b.get('callback_data','').startswith('ca:forms:') for row in rows for b in row):
+        rows.insert(0,[{'text':'مصمم الأسئلة داخل البوت' if ar else 'Design questions here','callback_data':'ca:fe:home'}])
     rows.append([{'text':'خروج من الإدارة وتجربة البوت' if ar else 'Exit management and try bot',
                   'callback_data':'ca:exit'}])
     response['reply_markup']={'inline_keyboard':rows}
@@ -153,7 +155,18 @@ async def child_control(session,project,update,cached=None):
             raise InlineBotError('missing')
         if action:
             text=None
-        response=await manager.handle(menu,text=text,callback=action)
+        from qmrsmithbot.telegram.child_dashboard import child_dashboard
+        from qmrsmithbot.telegram.child_forms import ChildFormEditor
+        response=await child_dashboard(manager,menu,action)
+        if response is None:
+            try:
+                response=await ChildFormEditor(manager,menu).handle(action=action,text=text)
+            except ValueError:
+                response=menu.response('لم يُحفظ التعديل. راجع حدود النص والأرقام والخيارات والمسارات. أعد إدخاله، أو افتح المصمم من جديد إذا تغيرت المسودة.' if menu.lang=='ar' else
+                    'Change not saved. Check text/number limits, choices and forward paths. Retry, or reopen the designer if the draft changed.',
+                    [[{'text':'مصمم الأسئلة' if menu.lang=='ar' else 'Question designer','callback_data':'fe:home'}]])
+        if response is None:
+            response=await manager.handle(menu,text=text,callback=action)
         if response is None:
             response=menu.response('استخدم الأزرار أو /cancel للعودة.' if menu.lang=='ar' else 'Use the controls or /cancel to return.')
     except (AuthorizationDenied,ProjectStateError,InlineBotError,ValueError):
