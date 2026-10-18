@@ -12,6 +12,7 @@ from uuid import UUID
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 
+
 @asynccontextmanager
 async def lifespan(app):
     async with httpx.AsyncClient(timeout=20, follow_redirects=False, trust_env=False,

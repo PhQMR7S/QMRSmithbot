@@ -89,3 +89,28 @@ messages. See NATIVE_FACTORY_EXPERIENCE.md for precise scope.
 
 This is a native chat redesign. A fully designed Mini App and universal support for every
 Telegram feature are not implemented. Child-bot real Telegram delivery remains unverified.
+
+
+## Buttons/files and contact products — 2026-10-18
+
+The factory now offers buttons and contact as first-class templates. Button projects have
+nested sections, text, HTTPS links and child-bot-scoped file uploads, with draft/live
+publication. Contact projects copy visitor messages to their verified owner and route only
+mapped owner replies back to that visitor, including supported attachments and block/unblock.
+There is no fixed button/file-count quota; Telegram and hosting capacity limits still apply.
+The owner must start the child bot before receiving contact messages. See BUTTONS_AND_CONTACT.md.
+
+Migration 20261017_05 was tested on an isolated expiring Neon branch, then applied to the active
+database with restricted app-role DML grants. Main app code 480a7555fac1ecd94d8443125ebb7ca913a34718
+and the ingress production deployment were verified READY; CI run 39032690792 passed all four
+jobs including twelve PostgreSQL integration scenarios. Real child-bot delivery remains
+unverified: the test Bot API was mocked and no real separate child token was available.
+
+The response path no longer serializes a five-second callback acknowledgement ahead of menu
+processing. A 600 ms acknowledgement deadline runs concurrently, and conversation/permission
+reads are cached only for the current request. A further performance change reuses bounded
+upstream connections on lifespan-capable ASGI hosts (fallback is request-scoped) and exposes
+Server-Timing for application/upstream measurement. Latest local validation: 265 tests passed;
+final CI and deployment checks are linked on PR #23. Live readiness/authentication probes
+returned 200/401/204, but those are not real Telegram end-to-end latency measurements. Free-host
+cold starts and network latency remain possible; no fixed speed percentage is claimed.
