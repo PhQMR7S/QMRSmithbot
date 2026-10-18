@@ -74,6 +74,7 @@ class FactoryMenu:
         if self.management is not None:
             rows.append([{'text': '📊 إحصائياتي' if self.lang == 'ar' else '📊 Statistics', 'callback_data': 'stats'},
                          {'text': '🧭 المساعدة' if self.lang == 'ar' else '🧭 Help', 'callback_data': 'help'}])
+        rows.append([{'text':'ميزات تيليجرام في النظام' if self.lang=='ar' else 'Telegram features in this product','callback_data':'features'}])
         rows.append([{'text': '🎛 تخصيص العرض' if self.lang == 'ar' else '🎛 Appearance',
                       'callback_data': 'appearance'}])
         if self.admin:
@@ -131,7 +132,9 @@ class FactoryMenu:
         if callback == 'wizarddefault':
             if state.step != 'welcome':
                 return self.response(self.text('invalid'))
-            text, callback = ('أهلًا بك 👋' if self.lang == 'ar' else 'Welcome 👋'), None
+            from qmrsmithbot.telegram.ready_copy import prepared_copy
+            kind = get_template(state.data['template']).mode
+            text, callback = prepared_copy(kind, state.data['name'], self.lang)[0].text, None
         if callback == 'wizardadd':
             if state.step != 'wizard_list':
                 return self.response(self.text('invalid'))

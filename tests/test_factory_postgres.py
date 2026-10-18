@@ -985,3 +985,58 @@ async def test_child_native_form_designer_saves_draft_and_publishes_from_child(f
         assert project.active_version==previous+2
     outsider,_=await deliver(callback='ca:fe:home',actor=owner+1)
     assert outsider is None
+
+
+@pytest.mark.asyncio
+async def test_child_ready_copy_preview_confirm_and_rich_plain_preferences(factory_database,monkeypatch):
+    from qmrsmithbot.db.factory_models import FactoryButtonRecord
+    from qmrsmithbot.db.models import WorkflowVersionRecord
+    from qmrsmithbot.telegram.inline_runtime import compile_text_program
+
+    project_id,_,launch,deliver=await create_product_bot(factory_database,monkeypatch,'buttons')
+    _,sessions,_,owner,_=factory_database
+    await launch()
+    await deliver(text='/admin')
+    await deliver(callback='ca:copy:home')
+    preview,_=await deliver(callback='ca:copy:preview:formal')
+    confirmation=preview['reply_markup']['inline_keyboard'][0][0]['callback_data']
+    async with sessions() as session:
+        project=await session.get(BotProjectRecord,project_id)
+        published=project.active_version
+        version=await session.scalar(select(WorkflowVersionRecord).where(WorkflowVersionRecord.project_id==project_id).order_by(WorkflowVersionRecord.version.desc()).limit(1))
+        before=version.version
+    await deliver(callback=confirmation)
+    async with sessions() as session:
+        version=await session.scalar(select(WorkflowVersionRecord).where(WorkflowVersionRecord.project_id==project_id).order_by(WorkflowVersionRecord.version.desc()).limit(1))
+        assert version.version==before+1
+        assert 'مرحبًا بكم' in compile_text_program(version.definition).commands['start']
+        assert (await session.get(BotProjectRecord,project_id)).active_version==published
+    await deliver(callback=confirmation)  # A second update cannot apply the same confirmation twice.
+    async with sessions() as session:
+        latest=await session.scalar(select(WorkflowVersionRecord.version).where(WorkflowVersionRecord.project_id==project_id).order_by(WorkflowVersionRecord.version.desc()).limit(1))
+        assert latest==before+1
+    guide,_=await deliver(callback='ca:copy:preview:guide')
+    await deliver(callback=guide['reply_markup']['inline_keyboard'][0][0]['callback_data'])
+    async with sessions() as session:
+        buttons=(await session.scalars(select(FactoryButtonRecord).where(FactoryButtonRecord.project_id==project_id))).all()
+        assert len(buttons)==1 and buttons[0].published is None
+    rich,_=await deliver(callback='ca:display:rich')
+    assert 'rich_message' in rich and 'text' not in rich
+    await deliver(callback='ca:welcome:'+str(project_id))
+    rich_saved,_=await deliver(text='Rich preference survives editing')
+    assert 'rich_message' in rich_saved
+    await deliver(callback=f'ca:bnew:{project_id.hex}:r:file')
+    await deliver(text='File from child panel')
+    async with sessions() as session:
+        media=await session.scalar(select(FactoryButtonRecord).where(FactoryButtonRecord.project_id==project_id,
+            FactoryButtonRecord.draft['kind'].astext=='file'))
+        media_id=media.id
+    await deliver(text='/start upload_'+media_id.hex)
+    receipt,_=await deliver(document='prepared-copy-file-id')
+    assert 'استلمت' in receipt['text']
+    still_rich,_=await deliver(callback='ca:identity')
+    assert 'rich_message' in still_rich
+    plain,_=await deliver(text='/plain')
+    assert 'text' in plain and 'rich_message' not in plain
+    outsider,_=await deliver(callback='ca:copy:home',actor=owner+1)
+    assert outsider is None

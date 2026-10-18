@@ -32,6 +32,9 @@ class ChildStore(SQLFactoryStore):
         if record is None:
             record=BotOwnerStateRecord(project_id=self.project_id,data={})
             self.session.add(record)
+        previous=(record.data or {}).get('control',{}).get('data',{})
+        if '_ui' in previous:
+            state.data.setdefault('_ui',deepcopy(previous['_ui']))
         record.data={**(record.data or {}),'control':{'step':state.step,'data':deepcopy(state.data)}}
         await self.session.flush()
 
@@ -51,7 +54,7 @@ class ChildManagement(BotManagement):
         return await super().latest(project_id)
 
 
-ALLOWED = frozenset(('workspace','delivery','identity','insights','fe','project','buttons','folder','item','bnew','bl','bedit','btitle','bdel',
+ALLOWED = frozenset(('features','display','copy','workspace','delivery','identity','insights','fe','project','buttons','folder','item','bnew','bl','bedit','btitle','bdel',
     'bdelete','bdesign','bd','content','rl','ri','ra','re','rd','ruledeleteok',
     'welcome','preview','simulate','rename','botsettings','profile','health',
     'launchask','launchok','formsetup','forms','fs','fdel','fdelok','contactsetup'))
@@ -100,7 +103,7 @@ async def child_control(session,project,update,cached=None):
     words=(text or '').split(maxsplit=1)
     command=words[0].split('@')[0] if words else None
     enter=bool(text and text.strip()=='/start admin') or command=='/admin'
-    explicit=bool(data and data.startswith('ca:')) or enter
+    explicit=bool(data and data.startswith('ca:')) or enter or command=='/plain'
     if not message or message.chat.type!='private' or not actor or actor.is_bot or message.chat.id!=actor.id:
         return explicit,None
     if data and data.startswith('ca:') and (not message.from_user or not message.from_user.is_bot or
@@ -127,14 +130,21 @@ async def child_control(session,project,update,cached=None):
             record.data={key:value for key,value in record.data.items() if key!='upload'}
         action='project:'+str(project.id)
         text=None
-    if action=='exit' or text=='/start':
+    if action=='exit' or text=='/start' or bool(text and text.startswith('/start upload_')):
         await store.save_state(MenuState('idle',{}))
-        if text=='/start':
+        if action!='exit':
             return False,None
         return True,{'method':'sendMessage','chat_id':actor.id,'text':
             'خرجت من الإدارة. أرسل /start لتجربة البوت، أو /admin للعودة.' if menu.lang=='ar' else
             'Management closed. Send /start to try the bot, or /admin to return.'}
     try:
+        if command=='/plain':
+            action='display:plain'
+        if action in ('display:rich','display:plain'):
+            state=await store.state()
+            state.data['_ui']={**state.data.get('_ui',{}),'rich':action=='display:rich'}
+            await menu.save_state(MenuState('idle',{'_ui':state.data['_ui']}))
+            action='identity'
         if action in ('pause','resume'):
             nonce=secrets.token_hex(12)
             await store.save_state(MenuState('child_running',{'nonce':nonce,'running':action=='resume'}))
@@ -157,7 +167,11 @@ async def child_control(session,project,update,cached=None):
             text=None
         from qmrsmithbot.telegram.child_dashboard import child_dashboard
         from qmrsmithbot.telegram.child_forms import ChildFormEditor
-        response=await child_dashboard(manager,menu,action)
+        from qmrsmithbot.telegram.feature_guide import feature_guide
+        from qmrsmithbot.telegram.ready_copy import ready_copy_panel
+        response=feature_guide(menu.lang,child=True) if action=='features' else await ready_copy_panel(manager,menu,action)
+        if response is None:
+            response=await child_dashboard(manager,menu,action)
         if response is None:
             try:
                 response=await ChildFormEditor(manager,menu).handle(action=action,text=text)
@@ -173,7 +187,8 @@ async def child_control(session,project,update,cached=None):
         response=menu.response('هذا الإجراء غير متاح. أرسل /admin لفتح لوحة بوتك.' if menu.lang=='ar' else
                                'Action unavailable. Send /admin to open this bot’s panel.')
     return True,telegram_response(localize_panel(response,project,menu.lang),actor_id=actor.id,
-                                 callback=callback,bot_id=project.telegram_bot_id)
+                                 callback=callback,bot_id=project.telegram_bot_id,
+                                 rich=(await store.state()).data.get('_ui',{}).get('rich',False),language=menu.lang)
 
 
 async def add_owner_entry(session,project,update,response):

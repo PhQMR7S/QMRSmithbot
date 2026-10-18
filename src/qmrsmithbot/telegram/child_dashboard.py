@@ -45,6 +45,7 @@ async def child_dashboard(manager,menu,action):
             rows=[[button('محرر الردود والأوامر','Reply & command editor','content:'+raw,'primary')]]
             detail=tr('أضف كل رد أو أمر على حدة، وعدّله وعاينه قبل النشر. المطابقة نصية ولا تتطلب مزود ذكاء اصطناعي.',
                       'Add, edit and preview replies or commands individually. Exact text matching needs no AI provider.')
+        rows.append([button('النصوص الجاهزة','Prepared text library','copy:home')])
         rows += [[button('رسالة البداية','Welcome message','welcome:'+raw),button('معاينة المسودة','Preview draft','preview:'+raw)],[root]]
         return menu.response(tr('مساحة التحرير','Editing workspace')+'\n'+kind+'\n\n'+detail,rows)
     if action=='delivery':
@@ -71,6 +72,8 @@ async def child_dashboard(manager,menu,action):
             'Bot identity & settings\n\nThis panel controls this bot only. Telegram profile changes apply immediately; content remains a draft until published.'),
             [[button('اسم العرض','Display name','profile:name:'+raw),button('وصف البوت','Description','profile:description:'+raw)],
              [button('النبذة المختصرة','Short bio','profile:about:'+raw),button('اسم المشروع','Project name','rename:'+raw)],
+             [button('لوحات برسائل غنية','Rich management panels','display:rich'),button('عرض نصي بسيط','Plain panels','display:plain')],
+             [button('ميزات تيليجرام المتاحة','Telegram feature availability','features')],
              [root]])
     if action=='insights':
         if program.kind=='form':

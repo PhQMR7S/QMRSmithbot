@@ -250,9 +250,12 @@ class BotManagement:
                 body = '\n'.join(f'{menu.text(key)}: {counts.get(key, 0)}'
                                  for key in ('running', 'stopped', 'draft', 'error'))
                 return menu.response(title + '\n\n' + body)
+            if callback == 'features':
+                from qmrsmithbot.telegram.feature_guide import feature_guide
+                return feature_guide(menu.lang)
             if callback == 'help' or (text == '/help' and state.step != 'bot_test'):
-                return menu.response(tr('🧭 خطوات إنشاء بوتك\n\n1. اختر قالبًا وأدخل المحتوى.\n2. افتح لوحة المشروع واربط توكن البوت من @BotFather.\n3. عاين المحتوى ثم اضغط «نشر وتشغيل».\n\nيمكنك تعديل الترحيب والردود وإيقاف البوت من لوحته. التوكن يُشفّر ولا يظهر في اللوحة.',
-                    '🧭 Create your bot\n\n1. Choose a template and add content.\n2. Open its panel and connect the bot token from @BotFather.\n3. Preview, then Publish & run.\n\nEdit content or stop your bot from its panel. Tokens are encrypted and never displayed.'))
+                return menu.response(tr('🧭 خطوات إنشاء بوتك\n\n1. اختر قالبًا وأدخل المحتوى.\n2. افتح لوحة المشروع واربط توكن البوت من @BotFather.\n3. عاين المحتوى ثم اضغط «نشر وتشغيل».\n\nبعد النشر، افتح بوتك وأرسل /admin. ستجد محرره وأدواته والنصوص الجاهزة داخله. المصنع للإنشاء والربط واستعادة الاتصال. التوكن يُشفّر ولا يظهر في اللوحة.',
+                    '🧭 Create your bot\n\n1. Choose a template and add content.\n2. Open its panel and connect the bot token from @BotFather.\n3. Preview, then Publish & run.\n\nAfter publishing, open your bot and send /admin for its editor, tools and prepared copy. The factory handles creation, binding and connection recovery. Tokens are encrypted and never displayed.'))
             if callback and ':' in callback:
                 if callback.startswith('profile:'):
                     _, field, raw_project = callback.split(':', 2)

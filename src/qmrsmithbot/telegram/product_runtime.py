@@ -129,12 +129,12 @@ async def buttons_response(session, project, program, message, actor_id, is_owne
         if state is None:
             state = BotOwnerStateRecord(project_id=project.id)
             session.add(state)
-        state.data = {**(state.data or {}), 'upload': str(item_id), 'control': {'step':'idle','data':{}}}
+        state.data = {**(state.data or {}), 'upload': str(item_id), 'control': {'step':'idle','data':{'_ui':(state.data or {}).get('control',{}).get('data',{}).get('_ui',{})}}}
         return say(actor_id, '📎 أرسل الملف أو الصورة أو الفيديو أو الصوت هنا. سيُحفظ لهذا الزر كمسودة؛ بعدها افتح /admin وانشر التعديلات. /cancel للإلغاء.')
     if is_owner:
         state = await session.get(BotOwnerStateRecord, project.id)
         if text == '/cancel' and state:
-            state.data = {}
+            state.data = {key:value for key,value in (state.data or {}).items() if key!='upload'}
             return say(actor_id, 'تم إلغاء الرفع.')
         if state and state.data.get('upload') and not (text or '').startswith('/'):
             item = await session.scalar(select(FactoryButtonRecord).where(
@@ -142,12 +142,12 @@ async def buttons_response(session, project, program, message, actor_id, is_owne
                 FactoryButtonRecord.deleted.is_(False)))
             file = file_reference(message)
             if item is None:
-                state.data = {}
+                state.data = {key:value for key,value in (state.data or {}).items() if key!='upload'}
                 return say(actor_id, 'الزر غير متاح. افتح /admin واختر زر الملف مجددًا.')
             if file is None:
                 return say(actor_id, 'أرسل ملفًا أو صورة أو فيديو أو صوتًا أو ملصقًا، أو /cancel.')
             item.draft = {**item.draft, **file}
-            state.data = {}
+            state.data = {key:value for key,value in (state.data or {}).items() if key!='upload'}
             return say(actor_id, '✅ استلمت الملف داخل بوتك. افتح /admin واضغط نشر لتطبيقه على الزوار.')
     parent_id, offset = None, 0
     selected = None
