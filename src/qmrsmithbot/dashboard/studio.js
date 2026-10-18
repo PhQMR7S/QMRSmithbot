@@ -519,14 +519,21 @@ export class Studio {
         ["prev", Math.max(0, this.offset - 8), !this.offset],
         ["next", this.offset + 8, !data.has_more],
       ]) {
-        const b = this.button(this.t(key), () => {
+        const changePage = () => {
           if (!this.canEditLeave()) return;
           this.offset = offset;
           this.resetEditor();
           this.load();
-        });
+        };
+        const b = this.button(this.t(key), changePage);
         b.disabled = disabled;
         this.pager.append(b);
+        if (!disabled) this.previewButtons.append(this.button(this.t(key), changePage));
+      }
+      if (this.parent) {
+        const parentTrail = this.trail.slice(0, -1);
+        this.previewButtons.append(this.button(parentTrail.at(-1)?.title || this.t("root"),
+          () => this.navigate(parentTrail.at(-1)?.id || null, parentTrail), "back"));
       }
       this.previewMessage.textContent = this.parent
         ? data.folder?.title || this.data.welcome
