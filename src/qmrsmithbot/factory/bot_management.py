@@ -282,34 +282,28 @@ class BotManagement:
                         await self.store.save_state(MenuState('idle', {}))
                         version = await self.latest(project_id)
                         record = await self.session.get(TelegramInlineBotRecord, project_id)
-                        connected = '@' + project.telegram_username if project.telegram_username else tr('غير مربوط', 'Not connected')
-                        status = menu.text(project.status)
                         pending = version.version != project.active_version
+                        counts = {}
                         if program.kind == 'buttons':
+                            # One aggregate query; no full file payloads or per-item queries.
+                            summary = (await self.session.execute(select(
+                                FactoryButtonRecord.draft['kind'].astext,
+                                func.count(),
+                                func.count().filter((FactoryButtonRecord.draft['kind'].astext == 'file') &
+                                    FactoryButtonRecord.draft['file_id'].astext.is_(None)),
+                            ).where(FactoryButtonRecord.project_id == project_id,
+                                    FactoryButtonRecord.deleted.is_(False)).group_by(
+                                        FactoryButtonRecord.draft['kind'].astext))).all()
+                            counts = {kind: count for kind, count, _ in summary}
+                            counts['missing_file'] = sum(missing for _, _, missing in summary)
                             pending = pending or bool(await self.session.scalar(select(FactoryButtonRecord.id).where(
                                 FactoryButtonRecord.project_id == project_id,
                                 ((FactoryButtonRecord.deleted.is_(False)) & FactoryButtonRecord.draft.is_distinct_from(FactoryButtonRecord.published)) | ((FactoryButtonRecord.deleted.is_(True)) & FactoryButtonRecord.published.is_not(None))).limit(1)))
-                        rows = [[button('📝 استوديو المحتوى', '📝 Content studio', 'content:' + raw)],
-                                [button('👁 معاينة الزائر', '👁 Visitor preview', 'preview:' + raw),
-                                 button('🚀 النشر', '🚀 Publish', 'launchask:' + raw)],
-                                [button('🔐 الاتصال والتوكن', '🔐 Connection & token', 'connection:' + raw),
-                                 button('⚙️ الإعدادات', '⚙️ Settings', 'botsettings:' + raw)]]
-                        if program.kind == 'buttons':
-                            rows[0] = [button('🗂 مصمم الأزرار والملفات', '🗂 Buttons & files designer', 'buttons:' + raw)]
-                        elif program.kind == 'form':
-                            rows[0] = [button('إدارة النموذج والإجابات', 'Form & submissions', 'formsetup:' + raw)]
-                        elif program.kind == 'contact':
-                            rows[0] = [button('✉️ إدارة التواصل', '✉️ Contact setup', 'contactsetup:' + raw)]
-                        if record is not None and record.enabled and project.active_version:
-                            op = 'stop' if project.status == 'running' else 'resume'
-                            rows.append([menu.button(op, op + 'ask:' + raw)])
-                        if settings.telegram_ingress_base_url:
-                            rows.append([{'text': tr('🎛 الاستوديو المرئي', '🎛 Visual studio'),
-                                'url':settings.telegram_ingress_base_url.rstrip('/')+'/dashboard?project='+raw}])
-                        rows.append([menu.button('back', 'home')])
-                        return menu.response(f'🤖 {project.name}\n{connected} · {status}\n\n' + tr('🟠 لديك تغييرات غير منشورة\n' if pending else '🟢 آخر التعديلات منشورة\n', '🟠 Unpublished changes\n' if pending else '🟢 Latest changes published\n')
-                            + tr(f'الإصدار المنشور: {project.active_version or "—"}\nآخر مسودة: {version.version}',
-                                 f'Published version: {project.active_version or "—"}\nLatest draft: {version.version}'), rows)
+                        from qmrsmithbot.factory.project_hub import project_hub
+                        body, rows = project_hub(project=project, version=version, program=program,
+                            record=record, pending=pending, language=menu.lang, counts=counts,
+                            studio_url=settings.telegram_ingress_base_url.rstrip('/'))
+                        return menu.response(body, rows)
                     if action == 'contactsetup':
                         rows = [[button('💬 رسالة استقبال الزائر', '💬 Visitor greeting', 'welcome:' + raw)],
                                 [button('🚀 نشر وتشغيل', '🚀 Publish & run', 'launchask:' + raw)], back(project_id)]

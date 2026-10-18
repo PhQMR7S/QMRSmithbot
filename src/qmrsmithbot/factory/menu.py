@@ -85,6 +85,10 @@ class FactoryMenu:
         if self.management is not None and text and re.fullmatch(r'/start project_[0-9a-fA-F]{32}', text):
             callback = 'project:' + str(UUID(text.split('project_', 1)[1]))
             text = None
+        from qmrsmithbot.factory.starters import starter_browser
+        response = await starter_browser(self, callback)
+        if response is not None:
+            return response
         from qmrsmithbot.factory.experience import experience
         response = await experience(self, text=text, callback=callback)
         if response is not None:
@@ -141,9 +145,13 @@ class FactoryMenu:
             await self.save_state(MenuState('idle', {}))
             descriptions = ('🗂 أزرار: أقسام، نصوص، روابط وملفات\n✉️ تواصل: رسائل الزوار والرد عليهم\nنماذج: أسئلة متسلسلة، خيارات وتفرعات\n\nقوالب إضافية\nترحيب بسيط برسالة بداية جاهزة\nردود نصية لعبارات يرسلها الزائر\nأوامر مثل /help مع ردود مخصصة' if self.lang == 'ar' else '🗂 Buttons: sections, text, links and files\n✉️ Contact: visitor messages and owner replies\nForms: questions, choices and branching\n\nMore templates\nWelcome: a start message\nText replies: respond to exact phrases\nCommands: custom /help-style replies')
             return self.response('✦ ' + self.text('choose') + '\n\n' + descriptions, [[{'text': t.title_ar if self.lang == 'ar' else t.title_en,
-                                   'callback_data': 'template:' + t.id}] for t in CATALOG]
-                                 + [[self.button('back', 'home')]])
+                                   'callback_data': 'discover:' + t.id}] for t in CATALOG]
+                                 + [[{'text':'ابدأ ببنية جاهزة' if self.lang == 'ar' else 'Start with a ready structure', 'callback_data':'starters'}], [self.button('back', 'home')]])
+        if callback and callback.startswith('discover:'):
+            from qmrsmithbot.factory.starters import template_detail
+            return template_detail(self, callback[9:])
         if callback and callback.startswith('template:'):
+
             try:
                 template = get_template(callback[9:])
             except KeyError:
@@ -204,7 +212,10 @@ class FactoryMenu:
             options = TemplateOptions.model_validate(state.data['options'])
             template = get_template(state.data['template'])
             definition = template.build(options).model_dump(mode='json')
-            project = await self.store.create(state.data['name'], definition)
+            if state.data.get('starter') and self.management is not None:
+                project = await self.store.create(state.data['name'], definition, starter=state.data['starter'])
+            else:
+                project = await self.store.create(state.data['name'], definition)
             await self.save_state(MenuState('idle', {}))
             rows = None
             if project is not None and self.management is not None:
@@ -281,8 +292,8 @@ class FactoryMenu:
         data['nonce'] = uuid4().hex
         await self.save_state(MenuState('confirm', data))
         count = len(data['options'].get('rules', []))
-        return self.response(f'{self.text("summary")}\n{data["name"]}\n{data["template"]}\n'
-                             f'{data["options"]["welcome"][:1000]}\n{count}',
+        return self.response(f'{self.text("summary")}\n{data["name"]}\n' + (get_template(data['template']).title_ar if self.lang == 'ar' else get_template(data['template']).title_en) + '\n'
+                             f'{data["options"]["welcome"][:1000]}\n' + (f'الردود المخصصة: {count}' if self.lang == 'ar' else f'Custom replies: {count}') + ('\nالنصوص النموذجية تحتاج مراجعة قبل النشر.' if data.get('starter') and self.lang == 'ar' else '\nReview sample content before publishing.' if data.get('starter') else ''),
                              [[self.button('confirm', 'confirm:' + data['nonce'])],
                               [{'text': '✏️ الاسم' if self.lang == 'ar' else '✏️ Name', 'callback_data': 'wizard:name'},
                                {'text': '💬 البداية' if self.lang == 'ar' else '💬 Welcome', 'callback_data': 'wizard:welcome'}],

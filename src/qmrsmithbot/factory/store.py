@@ -103,12 +103,21 @@ class SQLFactoryStore:
         return await self.projects_service.set_running(project_id=project_id, tenant_id=self.tenant_id,
                     running=running, actor_user_id=self.user.id)
 
-    async def create(self, name, definition):
+    async def create(self, name, definition, *, starter=None):
         await self.permission(Permission.PROJECT_WRITE)
+        if starter:
+            from qmrsmithbot.factory.starters import get_starter
+            from qmrsmithbot.telegram.inline_runtime import compile_text_program
+            if get_starter(starter) is None or compile_text_program(definition).kind != 'buttons':
+                raise ValueError('Invalid button starter')
         project = await self.projects_service.create_project(owner_id=self.user.id,
                     tenant_id=self.tenant_id, name=name)
         await self.projects_service.save_version(project_id=project.id, tenant_id=self.tenant_id,
                                                  definition=definition)
+        if starter:
+            from qmrsmithbot.factory.starters import starter_records
+            self.session.add_all(starter_records(starter, project.id, await self.language()))
+            await self.session.flush()
         await self.audit('factory.project.created', project.id, self.user.id, self.tenant_id)
         return project
 

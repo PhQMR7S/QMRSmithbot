@@ -813,3 +813,45 @@ async def test_forms_branching_frozen_sessions_duplicates_and_owner_only_inbox(f
             app.dependency_overrides.pop(dependency,None)
         async with sessions() as session,session.begin():
             await session.execute(delete(User).where(User.id==editor_id))
+
+
+@pytest.mark.asyncio
+async def test_starter_creation_is_atomic_deduplicated_and_editable(factory_database):
+    from uuid import UUID
+
+    from qmrsmithbot.db.factory_models import FactoryButtonRecord
+    from qmrsmithbot.factory.starters import get_starter
+
+    processor,sessions,update,_,_=factory_database
+    await processor.process(update(callback='suse:knowledge'))
+    await processor.process(update(text='Starter library'))
+    review=await processor.process(update(text='Library welcome'))
+    confirmation=update(callback=review['reply_markup']['inline_keyboard'][0][0]['callback_data'])
+    created=await processor.process(confirmation)
+    project_id=UUID(created['reply_markup']['inline_keyboard'][0][0]['callback_data'].split(':')[1])
+    assert await processor.process(confirmation) is None
+    async with sessions() as session:
+        items=(await session.scalars(select(FactoryButtonRecord).where(
+            FactoryButtonRecord.project_id==project_id).order_by(FactoryButtonRecord.created_at))).all()
+        assert len(items)==len(get_starter('knowledge').items)
+        assert all(item.published is None for item in items)
+        assert items[1].parent_id==items[0].id
+        child=items[1].id
+    hub=await processor.process(update(callback='project:'+str(project_id)))
+    assert 'مسار تجهيز' in hub['text']
+    assert 'الأقسام: 2' in hub['text']
+    await processor.process(update(callback='btitle:'+child.hex))
+    await processor.process(update(text='درس مخصص'))
+    async with sessions() as session:
+        item=await session.get(FactoryButtonRecord,child)
+        assert item.draft['title']=='درس مخصص'
+        assert item.published is None
+    await processor.process(update(callback='suse:knowledge'))
+    await processor.process(update(text='Another library'))
+    review=await processor.process(update(text='Other welcome'))
+    created=await processor.process(update(callback=review['reply_markup']['inline_keyboard'][0][0]['callback_data']))
+    other=UUID(created['reply_markup']['inline_keyboard'][0][0]['callback_data'].split(':')[1])
+    async with sessions() as session:
+        items=(await session.scalars(select(FactoryButtonRecord).where(FactoryButtonRecord.project_id==other))).all()
+        assert len(items)==len(get_starter('knowledge').items)
+        assert all(item.id != child and item.draft['title'] != 'درس مخصص' for item in items)

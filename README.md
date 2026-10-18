@@ -56,3 +56,7 @@ The form template supports text, numeric and choice questions with forward branc
 ### Connection diagnostics
 
 The native bot panel's Connection & token section includes a read-only diagnostic check for users with project-write permission. It verifies the token identity, checks whether Telegram's webhook matches this factory, and displays pending updates, historical delivery-error time, local runtime status and the elapsed time of two Telegram API requests. This is not an end-to-end visitor latency measurement. Raw Telegram errors, tokens and webhook URLs are not displayed. The check never resets the webhook or drops pending updates; API failures preserve connection settings.
+
+### Guided native builder
+
+Creating a bot now opens a capability detail page for each type. Button bots can start from an editable content library, service directory or community guide. A nested visitor preview runs before any project is created. Explicit confirmation creates an independent draft with its own button IDs; sample content is labeled and must be reviewed before publishing. Existing projects are never overwritten or automatically published. The native project hub shows setup steps, draft/published versions, type-specific controls and aggregate button/file counts, including pending uploads. A service directory is not a payment processor, and contact bots are not a multi-agent ticket platform.
