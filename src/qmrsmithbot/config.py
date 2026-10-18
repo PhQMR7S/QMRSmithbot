@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
@@ -13,6 +14,14 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://qmrsmith:qmrsmith@localhost:5432/qmrsmith"
     redis_url: str = "redis://localhost:6379/0"
     telegram_factory_bot_token: SecretStr = SecretStr("")
+    telegram_factory_admin_ids: tuple[int, ...] = ()
+    telegram_factory_enabled: bool = False
+    telegram_factory_username: str = ''
+    auth_telegram_enabled: bool = False
+    telegram_runtime_consumer_verified: bool = False
+    telegram_inline_runtime_enabled: bool = False
+    telegram_ingress_base_url: str = ''
+    telegram_factory_webhook_secret: SecretStr = SecretStr("")
     telegram_credential_encryption_key: SecretStr = SecretStr("")
     telegram_webhook_base_url: str = ""
     telegram_worker_poll_seconds: float = Field(default=1.0, ge=0.1, le=30.0)
@@ -33,6 +42,7 @@ class Settings(BaseSettings):
     session_absolute_ttl_minutes: int = Field(default=480, ge=5, le=10080)
     session_idle_ttl_minutes: int = Field(default=30, ge=5, le=1440)
     rate_limit_enabled: bool = False
+    rate_limit_backend: Literal['redis', 'postgresql'] = 'redis'
     rate_limit_requests: int = Field(default=10, ge=1, le=10000)
     rate_limit_window_seconds: int = Field(default=60, ge=1, le=3600)
 
@@ -40,6 +50,34 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_environment(self) -> "Settings":
+        if self.telegram_inline_runtime_enabled:
+            ingress = urlparse(self.telegram_ingress_base_url)
+            if (not self.telegram_factory_enabled or ingress.scheme != 'https' or not ingress.hostname
+                    or ingress.path not in ('', '/') or ingress.query or ingress.fragment
+                    or ingress.username or ingress.password
+                    or not self.telegram_credential_encryption_key.get_secret_value()):
+                raise ValueError('Text runtime requires factory credentials and an HTTPS ingress origin')
+        if self.auth_telegram_enabled:
+            import re
+            if not self.telegram_factory_enabled:
+                raise ValueError('Telegram login requires TELEGRAM_FACTORY_ENABLED')
+            if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{1,28}[Bb][Oo][Tt]',
+                                self.telegram_factory_username):
+                raise ValueError('TELEGRAM_FACTORY_USERNAME must be a bot username without @')
+            if not self.telegram_webhook_base_url:
+                raise ValueError('Telegram login requires TELEGRAM_WEBHOOK_BASE_URL')
+        if self.telegram_factory_enabled:
+            import re
+            secret = self.telegram_factory_webhook_secret.get_secret_value()
+            if not self.telegram_factory_bot_token.get_secret_value():
+                raise ValueError("Factory token is required when the factory is enabled")
+            if not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", secret):
+                raise ValueError("Factory webhook secret must contain 32 to 256 URL-safe characters")
+            if not re.fullmatch(r"[0-9]{5,16}:[A-Za-z0-9_-]{30,100}",
+                                self.telegram_factory_bot_token.get_secret_value()):
+                raise ValueError("Factory bot token has an invalid format")
+        if any(user_id <= 0 for user_id in self.telegram_factory_admin_ids):
+            raise ValueError("TELEGRAM_FACTORY_ADMIN_IDS must contain positive user IDs")
         environment = self.app_env.strip().lower()
         if environment not in {"development", "test", "staging", "production"}:
             raise ValueError("app_env must be development, test, staging, or production")
@@ -64,8 +102,8 @@ class Settings(BaseSettings):
                 raise ValueError("AUTH_DEV_BOOTSTRAP_ENABLED must be false in production")
             if not self.rate_limit_enabled:
                 raise ValueError("RATE_LIMIT_ENABLED must be true in production")
-            if not self.auth_oidc_enabled:
-                raise ValueError("AUTH_OIDC_ENABLED must be true in production")
+            if not self.auth_oidc_enabled and not self.auth_telegram_enabled:
+                raise ValueError("AUTH_OIDC_ENABLED or AUTH_TELEGRAM_ENABLED must be true in production")
         if self.telegram_credential_encryption_key.get_secret_value().strip():
             try:
                 Fernet(

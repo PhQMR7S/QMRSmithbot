@@ -34,6 +34,22 @@ class FakeProjectStore:
         self.projects[project.id] = project
         return project
 
+    async def list_projects(self, *, tenant_id, query, limit, offset, status):
+        projects = sorted((p for p in self.projects.values()
+                           if p.tenant_id == tenant_id and query.casefold() in p.name.casefold()
+                           and (status is None or p.status == status)), key=lambda p: p.id)
+        return projects[offset:offset + limit]
+
+    async def rename_project(self, *, project_id, tenant_id, name):
+        from dataclasses import replace
+
+        from qmrsmithbot.projects.service import ProjectNotFoundError
+        p = await self.get_project_for_tenant(project_id, tenant_id)
+        if p is None:
+            raise ProjectNotFoundError('project was not found')
+        self.projects[p.id] = replace(p, name=name)
+        return self.projects[p.id]
+
     async def get_project_for_tenant(self, project_id: UUID, tenant_id: UUID) -> BotProject | None:
         project = self.projects.get(project_id)
         return project if project is not None and project.tenant_id == tenant_id else None
@@ -137,3 +153,102 @@ def test_workflow_lifecycle_endpoints(client: TestClient) -> None:
 def test_missing_session_is_rejected() -> None:
     response = TestClient(app).post("/api/v1/projects", json={"name": "No Auth"})
     assert response.status_code == 401
+
+
+def test_template_catalog_and_draft_creation(client):
+    catalog = client.get('/api/v1/templates?language_code=en')
+    assert catalog.status_code == 200
+    assert {'buttons', 'contact', 'form', 'welcome', 'auto-replies', 'command-menu'} == {item['id'] for item in catalog.json()}
+    response = client.post('/api/v1/templates/auto-replies/projects', json={
+        'name': 'FAQ', 'rules': [{'trigger': 'price', 'response': 'Ask our team'}]})
+    assert response.status_code == 201
+    body = response.json()
+    assert body['owner_id'] == 42
+    assert body['tenant_id'] == str(TENANT_ID)
+    assert body['status'] == 'draft'
+    assert body['active_version'] is None
+    assert body['draft_version']['version'] == 1
+    assert body['draft_version']['published_at'] is None
+
+
+def test_templates_reject_invalid_requests(client):
+    for template, payload, code in [
+        ('missing', {'name': 'A'}, 404),
+        ('welcome', {'name': '   '}, 422),
+        ('auto-replies', {'name': 'A'}, 422),
+        ('command-menu', {'name': 'A', 'rules': [{'trigger': 'start', 'response': 'x'}]}, 422),
+        ('welcome', {'name': 'A', 'owner_id': 9}, 422),
+    ]:
+        assert client.post(f'/api/v1/templates/{template}/projects', json=payload).status_code == code
+
+
+def test_template_authentication_required():
+    c = TestClient(app)
+    assert c.get('/api/v1/templates').status_code == 401
+    assert c.post('/api/v1/templates/welcome/projects', json={'name': 'A'}).status_code == 401
+
+
+def test_template_permission_is_required(client):
+    from qmrsmithbot.auth.authorization import AuthorizationDenied
+
+    class Denied:
+        async def require_permission(self, **kwargs):
+            raise AuthorizationDenied('Permission denied')
+
+    app.dependency_overrides[get_authorization_service] = Denied
+    assert client.post('/api/v1/templates/welcome/projects', json={'name': 'A'}).status_code == 403
+
+
+def test_no_fixed_five_project_limit(client):
+    for index in range(6):
+        response = client.post('/api/v1/templates/welcome/projects', json={'name': f'Bot {index}'})
+        assert response.status_code == 201
+
+
+
+def test_project_search_pagination_and_rename(client):
+    created = [client.post('/api/v1/projects', json={'name': f'Item {i}'}).json() for i in range(3)]
+    first = client.get('/api/v1/projects?query=item&limit=2').json()
+    second = client.get('/api/v1/projects?query=item&limit=2&offset=2').json()
+    assert first['has_more'] is True
+    assert second['has_more'] is False
+    ids = [p['id'] for p in first['items'] + second['items']]
+    assert set(ids) == {p['id'] for p in created}
+    assert len(ids) == len(set(ids))
+    target = created[0]['id']
+    assert client.patch(f'/api/v1/projects/{target}', json={'name': ' Renamed '}).json()['name'] == 'Renamed'
+    assert len(client.get('/api/v1/projects?query=renamed').json()['items']) == 1
+    assert client.patch(f'/api/v1/projects/{target}', json={'name': ' '}).status_code == 422
+    assert client.patch(f'/api/v1/projects/{uuid4()}', json={'name': 'Other'}).status_code == 404
+
+
+@pytest.mark.parametrize('query', ['limit=0', 'limit=101', 'offset=-1', 'status=invalid'])
+def test_invalid_project_filters(client, query):
+    assert client.get('/api/v1/projects?' + query).status_code == 422
+
+
+@pytest.mark.parametrize('action', ['stop', 'resume'])
+def test_project_lifecycle_permission_denied(client, action):
+    from qmrsmithbot.auth.authorization import AuthorizationDenied
+
+    class Denied:
+        async def require_permission(self, **kwargs):
+            raise AuthorizationDenied('Permission denied')
+
+    app.dependency_overrides[get_authorization_service] = Denied
+    assert client.post(f'/api/v1/projects/{uuid4()}/{action}').status_code == 403
+
+
+@pytest.mark.parametrize('action,running', [('stop', False), ('resume', True)])
+def test_project_lifecycle_routes_forward_authenticated_scope(client, action, running):
+    from unittest.mock import AsyncMock
+
+    service = AsyncMock()
+    project_id = uuid4()
+    service.set_running.return_value = BotProject(
+        id=project_id, owner_id=42, tenant_id=TENANT_ID, name='A',
+        active_version=1, status='running' if running else 'stopped')
+    app.dependency_overrides[get_project_service] = lambda: service
+    assert client.post(f'/api/v1/projects/{project_id}/{action}').status_code == 200
+    service.set_running.assert_awaited_once_with(
+        project_id=project_id, tenant_id=TENANT_ID, running=running, actor_user_id=42)

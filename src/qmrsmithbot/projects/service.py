@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from uuid import UUID, uuid4
 
 from qmrsmithbot.domain.models import BotProject as Project
-from qmrsmithbot.domain.models import WorkflowVersion
+from qmrsmithbot.domain.models import BotStatus, WorkflowVersion
 from qmrsmithbot.workflows.schema import WorkflowDefinition
 
 
@@ -24,11 +24,26 @@ class InvalidWorkflowError(ValueError):
 ProjectAudit = Callable[[str, UUID, int, UUID], Awaitable[None]]
 
 
+class ProjectStateError(ValueError):
+    """A requested lifecycle transition is not safe for the current project."""
+
+
 class ProjectStore:
     """Persistence contract for tenant-scoped project/version lifecycle operations."""
 
     async def create_project(self, project: Project) -> Project:
         raise NotImplementedError
+
+    async def list_projects(self, *, tenant_id: UUID, query: str, limit: int,
+                            offset: int, status: BotStatus | None) -> list[Project]:
+        raise NotImplementedError
+
+    async def rename_project(self, *, project_id: UUID, tenant_id: UUID, name: str) -> Project:
+        raise NotImplementedError
+
+    async def set_running(self, *, project_id: UUID, tenant_id: UUID, running: bool) -> Project:
+        raise NotImplementedError
+
 
     async def get_project_for_tenant(self, project_id: UUID, tenant_id: UUID) -> Project | None:
         raise NotImplementedError
@@ -64,6 +79,34 @@ class ProjectService:
         return await self.store.create_project(
             Project(id=uuid4(), owner_id=owner_id, tenant_id=tenant_id, name=normalized_name)
         )
+
+    async def list_projects(self, *, tenant_id: UUID, query: str = "", limit: int = 20,
+                            offset: int = 0, status: BotStatus | None = None) -> list[Project]:
+        if not 1 <= limit <= 101 or offset < 0 or len(query) > 120:
+            raise ValueError("Invalid pagination or search")
+        return await self.store.list_projects(
+            tenant_id=tenant_id, query=query.strip(), limit=limit, offset=offset, status=status
+        )
+
+    async def rename(self, *, project_id: UUID, tenant_id: UUID, name: str,
+                     actor_user_id: int) -> Project:
+        name = name.strip()
+        if not name or len(name) > 120:
+            raise ValueError("Project name must contain 1 to 120 characters")
+        project = await self.store.rename_project(
+            project_id=project_id, tenant_id=tenant_id, name=name
+        )
+        await self._audit("project.rename", project_id, actor_user_id, tenant_id)
+        return project
+
+    async def set_running(self, *, project_id: UUID, tenant_id: UUID, running: bool,
+                          actor_user_id: int) -> Project:
+        project = await self.store.set_running(
+            project_id=project_id, tenant_id=tenant_id, running=running
+        )
+        await self._audit("project.resume" if running else "project.stop",
+                          project_id, actor_user_id, tenant_id)
+        return project
 
     async def get_project(self, *, project_id: UUID, tenant_id: UUID) -> Project:
         return self._require_project(await self.store.get_project_for_tenant(project_id, tenant_id))

@@ -10,6 +10,84 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  browser:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install runtime and browser test dependencies
+        run: |
+          pip install .
+          npm install --prefix "$RUNNER_TEMP/browser" playwright@1.62.1 --no-audit --no-fund
+          node "$RUNNER_TEMP/browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Verify dashboard and Telegram login on desktop and mobile
+        env:
+          NODE_PATH: ${{ runner.temp }}/browser/node_modules
+          QA_SCREENSHOT_DIR: ${{ runner.temp }}/qmrsmith-browser-evidence
+          BASE_URL: http://127.0.0.1:8877
+        run: |
+          mkdir -p "$QA_SCREENSHOT_DIR"
+          python -m uvicorn qmrsmithbot.api.app:app --host 127.0.0.1 --port 8877 &
+          app_pid=$!
+          trap 'kill "$app_pid"' EXIT
+          curl --fail --silent --retry 20 --retry-connrefused --retry-delay 1 "$BASE_URL/health"
+          node tests/dashboard.browser.cjs
+          node tests/studio.browser.cjs
+          node tests/forms.browser.cjs
+          node tests/telegram_login.browser.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-qa-evidence
+          path: ${{ runner.temp }}/qmrsmith-browser-evidence
+          retention-days: 7
+          if-no-files-found: ignore
+
+  postgres-migrations:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: qmrsmith
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: qmrsmith
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://qmrsmith:ci-only-password@localhost:5432/qmrsmith
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install project and test dependencies
+        run: pip install '.[dev]'
+      - name: Apply all migrations on PostgreSQL and verify repeatability
+        run: |
+          alembic upgrade head
+          alembic upgrade head
+          alembic current
+      - name: Exercise factory transactions and concurrent duplicate delivery
+        env:
+          QMRSMITH_INTEGRATION_DATABASE_URL: postgresql+asyncpg://qmrsmith:ci-only-password@localhost:5432/qmrsmith
+        run: pytest -q tests/test_factory_postgres.py
+
   quality:
     runs-on: ubuntu-latest
     steps:
@@ -28,3 +106,23 @@ jobs:
         run: alembic upgrade head --sql > /tmp/qmrsmithbot-migration.sql
       - name: Tests
         run: pytest -q
+
+  runtime-only:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      APP_ENV: test
+      AUTH_DEV_BOOTSTRAP_ENABLED: "false"
+      TELEGRAM_FACTORY_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install runtime without development extras
+        run: python -m pip install .
+      - name: Exercise packaged application
+        working-directory: /tmp
+        run: python "$GITHUB_WORKSPACE/tests/runtime_smoke.py"

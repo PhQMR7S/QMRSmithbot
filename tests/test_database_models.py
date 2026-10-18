@@ -23,6 +23,18 @@ from qmrsmithbot.db.workflow_runtime_models import (
 def test_database_schema_contains_expected_tables() -> None:
     expected = {
         "users",
+        "security_rate_limits",
+        "telegram_login_challenges",
+        "factory_updates",
+        "factory_buttons",
+        "bot_form_sessions",
+        "bot_form_submissions",
+        "bot_owner_states",
+        "contact_deliveries",
+        "contact_blocks",
+        "telegram_inline_bots",
+        "telegram_inline_updates",
+        "factory_conversations",
         "identities",
         "sessions",
         "tenants",

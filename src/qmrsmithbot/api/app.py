@@ -1,12 +1,21 @@
 from contextlib import asynccontextmanager
+from time import perf_counter
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from qmrsmithbot.api.auth import router as auth_router
+from qmrsmithbot.api.dashboard import router as dashboard_router
+from qmrsmithbot.api.factory import router as factory_router
+from qmrsmithbot.api.inline_bots import router as inline_bots_router
+from qmrsmithbot.api.preferences import router as preferences_router
 from qmrsmithbot.api.projects import router as projects_router
+from qmrsmithbot.api.readiness import router as readiness_router
+from qmrsmithbot.api.studio import router as studio_router
 from qmrsmithbot.api.telegram import router as telegram_router
+from qmrsmithbot.api.telegram_login import router as telegram_login_router
 from qmrsmithbot.api.telegram_webhook import router as telegram_webhook_router
+from qmrsmithbot.api.templates import router as templates_router
 from qmrsmithbot.api.tenants import router as tenants_router
 from qmrsmithbot.auth.authorization import AuthorizationDenied
 from qmrsmithbot.auth.service import (
@@ -19,6 +28,7 @@ from qmrsmithbot.db.session import close_database
 from qmrsmithbot.projects.service import (
     InvalidWorkflowError,
     ProjectNotFoundError,
+    ProjectStateError,
     VersionNotFoundError,
 )
 from qmrsmithbot.rate_limit import close_rate_limiter
@@ -42,14 +52,23 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="QMRSmithbot", version="0.1.0", lifespan=lifespan)
 app.include_router(auth_router)
+app.include_router(telegram_login_router)
+app.include_router(dashboard_router)
+app.include_router(factory_router)
+app.include_router(inline_bots_router)
+app.include_router(preferences_router)
 app.include_router(projects_router)
+app.include_router(studio_router)
+app.include_router(readiness_router)
 app.include_router(tenants_router)
+app.include_router(templates_router)
 app.include_router(telegram_router)
 app.include_router(telegram_webhook_router)
 
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
+    started = perf_counter()
     request_id = attach_request_id(request)
     token = set_request_id(request_id)
     try:
@@ -57,6 +76,7 @@ async def request_id_middleware(request: Request, call_next):
     finally:
         reset_request_id(token)
     response.headers["X-Request-ID"] = request_id
+    response.headers["Server-Timing"] = f'app;dur={(perf_counter()-started)*1000:.1f}'
     return response
 
 
@@ -127,3 +147,13 @@ async def telegram_webhook_error(_: Request, exc: TelegramWebhookError) -> JSONR
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "QMRSmithbot"}
+
+
+@app.get('/', include_in_schema=False)
+async def homepage() -> RedirectResponse:
+    return RedirectResponse(url='/dashboard', status_code=307)
+
+
+@app.exception_handler(ProjectStateError)
+async def project_state_error(_: Request, exc: ProjectStateError) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc)})

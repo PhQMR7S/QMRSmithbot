@@ -6,6 +6,8 @@ import socket
 from typing import Final
 from uuid import uuid4
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from qmrsmithbot.config import settings
 from qmrsmithbot.db.session import SessionFactory
 from qmrsmithbot.telegram.execution import (
@@ -47,7 +49,7 @@ class TelegramRuntimeWorker:
                 await TelegramUpdateQueue(session).fail(
                     update_id=item.id,
                     claim_token=item.claim_token,
-                    error=str(exc),
+                    error=f"non-retryable handler error: {type(exc).__name__}",
                     retry_delay_seconds=0,
                     terminal=True,
                 )
@@ -60,7 +62,22 @@ class TelegramRuntimeWorker:
                 await TelegramUpdateQueue(session).fail(
                     update_id=item.id,
                     claim_token=item.claim_token,
-                    error=str(exc) or exc.__class__.__name__,
+                    error=f"retryable handler error: {type(exc).__name__}",
+                    retry_delay_seconds=delay,
+                )
+        except Exception as exc:  # noqa: BLE001 - isolate arbitrary plugin/handler failures
+            # Unexpected handler errors must not terminate the consumer loop or
+            # strand a claim until lease expiry. Do not persist arbitrary exception
+            # messages: they may contain user input or credentials.
+            delay = min(
+                MAX_RETRY_DELAY_SECONDS,
+                max(1, 2 ** min(item.attempts - 1, 8)) + random.randint(0, 3),
+            )
+            async with SessionFactory() as session, session.begin():
+                await TelegramUpdateQueue(session).fail(
+                    update_id=item.id,
+                    claim_token=item.claim_token,
+                    error=f"unexpected handler error: {type(exc).__name__}",
                     retry_delay_seconds=delay,
                 )
         else:
@@ -76,7 +93,16 @@ class TelegramRuntimeWorker:
 
     async def run_forever(self) -> None:
         while not self._stop.is_set():
-            did_work = await self.run_once()
+            try:
+                did_work = await self.run_once()
+            except (SQLAlchemyError, OSError, ConnectionError):
+                # Infrastructure failures must not permanently kill the queue consumer.
+                # Sleep rather than busy-looping when the database is unavailable.
+                try:
+                    await asyncio.wait_for(self._stop.wait(), timeout=5.0)
+                except TimeoutError:
+                    pass
+                continue
             if not did_work:
                 try:
                     await asyncio.wait_for(

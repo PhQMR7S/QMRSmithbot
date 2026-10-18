@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from qmrsmithbot.config import settings
 from qmrsmithbot.db import (
+    factory_models,  # noqa: F401
     models,  # noqa: F401
     telegram_runtime_models,  # noqa: F401
     workflow_runtime_models,  # noqa: F401
