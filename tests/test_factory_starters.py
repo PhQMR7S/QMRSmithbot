@@ -3,12 +3,28 @@ from uuid import uuid4
 
 from aiogram.types import InlineKeyboardMarkup
 
-from qmrsmithbot.factory.menu import FactoryMenu
+from qmrsmithbot.factory.menu import FactoryMenu, MenuState
 from qmrsmithbot.factory.project_hub import project_hub
 from qmrsmithbot.factory.starters import STARTERS, starter_records
 from qmrsmithbot.telegram.inline_runtime import compile_text_program
 from qmrsmithbot.templates.catalog import TemplateOptions, get_template
-from tests.test_factory_menu import Store
+
+
+class Store:
+    def __init__(self):
+        self.lang = 'ar'
+        self.conversation = MenuState('idle', {})
+        self.created = []
+
+    async def language(self):
+        return self.lang
+
+    async def state(self):
+        return self.conversation
+
+    async def save_state(self, state):
+        self.conversation = state
+
 
 
 async def test_preview_navigates_without_creating_and_retains_selection_in_review():

@@ -287,13 +287,12 @@ class BotManagement:
                         if program.kind == 'buttons':
                             # One aggregate query; no full file payloads or per-item queries.
                             summary = (await self.session.execute(select(
-                                FactoryButtonRecord.draft['kind'].astext,
+                                FactoryButtonRecord.draft['kind'].astext.label('button_kind'),
                                 func.count(),
                                 func.count().filter((FactoryButtonRecord.draft['kind'].astext == 'file') &
                                     FactoryButtonRecord.draft['file_id'].astext.is_(None)),
                             ).where(FactoryButtonRecord.project_id == project_id,
-                                    FactoryButtonRecord.deleted.is_(False)).group_by(
-                                        FactoryButtonRecord.draft['kind'].astext))).all()
+                                    FactoryButtonRecord.deleted.is_(False)).group_by('button_kind'))).all()
                             counts = {kind: count for kind, count, _ in summary}
                             counts['missing_file'] = sum(missing for _, _, missing in summary)
                             pending = pending or bool(await self.session.scalar(select(FactoryButtonRecord.id).where(
