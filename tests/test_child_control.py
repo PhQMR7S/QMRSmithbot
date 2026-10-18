@@ -59,3 +59,10 @@ async def test_foreign_authored_admin_callback_is_ignored_before_reading_secrets
     session=SimpleNamespace(get=AsyncMock())
     assert await child_control(session,SimpleNamespace(telegram_bot_id=100),update)==(True,None)
     session.get.assert_not_awaited()
+
+
+async def test_whitespace_message_is_not_a_management_command():
+    update=Update.model_validate({'update_id':1,'message':{'message_id':1,'date':1,
+        'chat':{'id':42,'type':'private'},'from':{'id':42,'is_bot':False,'first_name':'A'},'text':'   '}})
+    session=SimpleNamespace(get=AsyncMock(return_value=None))
+    assert await child_control(session,SimpleNamespace(id=uuid4()),update)==(False,None)

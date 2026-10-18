@@ -95,7 +95,9 @@ async def child_control(session,project,update,cached=None):
     actor=callback.from_user if callback else message.from_user if message else None
     text=message.text if message and not callback else None
     data=callback.data if callback else None
-    enter=bool(text and text.strip()=='/start admin') or bool(text and text.split()[0].split('@')[0]=='/admin')
+    words=(text or '').split(maxsplit=1)
+    command=words[0].split('@')[0] if words else None
+    enter=bool(text and text.strip()=='/start admin') or command=='/admin'
     explicit=bool(data and data.startswith('ca:')) or enter
     if not message or message.chat.type!='private' or not actor or actor.is_bot or message.chat.id!=actor.id:
         return explicit,None
