@@ -51,7 +51,7 @@ Previously the factory awaited a new answerCallbackQuery network request (up to 
 before starting menu processing. Acknowledgement now runs concurrently with processing and
 has a 600 ms deadline; all tasks are awaited before the serverless invocation returns.
 The factory store loads conversation state once and caches authorization decisions for that
-request only. A later request rechecks permissions. Tests verify ordering, state isolation
+request only. A later request rechecks permissions. The ingress reuses a bounded HTTP connection pool when its host runs ASGI lifespan (with a request-scoped fallback otherwise). Server-Timing reports application and upstream processing separately from client-observed network time. Tests verify ordering, state isolation
 and cache scope. These changes remove avoidable waits; they are not a measured end-to-end
 speed percentage or a promise to eliminate host/DB cold starts and Telegram network latency.
 

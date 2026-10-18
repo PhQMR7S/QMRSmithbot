@@ -13,3 +13,13 @@ def test_invalid_request_id_is_replaced() -> None:
     generated = resolve_request_id("attacker-supplied-log-line")
     UUID(generated)
     assert generated != "attacker-supplied-log-line"
+
+
+def test_application_reports_processing_time_without_exposing_request_data():
+    from fastapi.testclient import TestClient
+    from qmrsmithbot.api.app import app
+    with TestClient(app) as client:
+        result = client.get('/health')
+    value = result.headers['server-timing']
+    assert value.startswith('app;dur=')
+    assert float(value.split('=')[1]) >= 0

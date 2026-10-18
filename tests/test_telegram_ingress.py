@@ -106,3 +106,18 @@ async def test_ingress_preserves_supported_native_panel_commands(ingress, method
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=ingress.app), base_url='https://test') as client:
         result = await client.post('/webhook', json={'update_id': 7}, headers={'X-Telegram-Bot-Api-Secret-Token': 'S'*40})
         assert result.status_code == 200 and result.json() == payload
+
+
+@pytest.mark.asyncio
+async def test_ingress_reuses_and_closes_lifespan_connection_pool(ingress):
+    async with ingress.app.router.lifespan_context(ingress.app):
+        first = ingress.upstream_client()
+        second = ingress.upstream_client()
+        client = await anext(first)
+        assert await anext(second) is client
+        assert not client.is_closed
+        await first.aclose()
+        await second.aclose()
+        assert not client.is_closed
+    assert client.is_closed
+    assert not hasattr(ingress.app.state, 'upstream')

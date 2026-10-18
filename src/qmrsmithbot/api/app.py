@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from time import perf_counter
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -65,6 +66,7 @@ app.include_router(telegram_webhook_router)
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
+    started = perf_counter()
     request_id = attach_request_id(request)
     token = set_request_id(request_id)
     try:
@@ -72,6 +74,7 @@ async def request_id_middleware(request: Request, call_next):
     finally:
         reset_request_id(token)
     response.headers["X-Request-ID"] = request_id
+    response.headers["Server-Timing"] = f'app;dur={(perf_counter()-started)*1000:.1f}'
     return response
 
 

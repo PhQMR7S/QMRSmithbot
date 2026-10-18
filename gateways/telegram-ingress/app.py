@@ -3,6 +3,8 @@ import hashlib
 import hmac
 import json
 import os
+from contextlib import asynccontextmanager
+from time import perf_counter
 from typing import Annotated
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -10,12 +12,28 @@ from uuid import UUID
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 
-app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+@asynccontextmanager
+async def lifespan(app):
+    async with httpx.AsyncClient(timeout=20, follow_redirects=False, trust_env=False,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10)) as client:
+        app.state.upstream = client
+        try:
+            yield
+        finally:
+            del app.state.upstream
+
+
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 MAX_BODY = 1_048_576
 HEADERS = {'Cache-Control': 'no-store'}
 
 
 async def upstream_client():
+    pooled = getattr(app.state, 'upstream', None)
+    if pooled is not None:
+        yield pooled
+        return
+    # ASGI hosts that do not run lifespan still have a bounded, request-scoped fallback.
     async with httpx.AsyncClient(timeout=20, follow_redirects=False, trust_env=False) as client:
         yield client
 
@@ -76,15 +94,17 @@ async def forward(request, client, path, secret):
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail='Invalid Telegram update', headers=HEADERS) from exc
     try:
+        started = perf_counter()
         result = await client.post(origin + path, content=bytes(body),
             headers={'Content-Type': 'application/json', 'x-vercel-protection-bypass': bypass,
                      'X-Telegram-Bot-Api-Secret-Token': secret})
+        response_headers = {**HEADERS, 'Server-Timing': f'upstream;dur={(perf_counter()-started)*1000:.1f}'}
         if result.status_code == 204:
-            return Response(status_code=204, headers=HEADERS)
+            return Response(status_code=204, headers=response_headers)
         if result.status_code == 200 and len(result.content) <= 65536:
             response = result.json()
             if isinstance(response, dict) and response.get('method') in ('sendMessage', 'editMessageText', 'sendRichMessage', 'sendDocument', 'sendPhoto', 'sendVideo', 'sendAudio', 'sendVoice', 'sendAnimation', 'sendVideoNote', 'sendSticker'):
-                return Response(content=result.content, media_type='application/json', headers=HEADERS)
+                return Response(content=result.content, media_type='application/json', headers=response_headers)
     except (httpx.HTTPError, ValueError):
         pass
     # Never relay upstream HTML, exception details, redirect targets or credentials.
