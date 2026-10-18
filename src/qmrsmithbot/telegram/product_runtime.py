@@ -11,6 +11,7 @@ from qmrsmithbot.db.factory_models import (
     FactoryButtonRecord,
 )
 from qmrsmithbot.db.models import IdentityRecord
+from qmrsmithbot.factory.button_design import append_visitor_button, order_expression
 from qmrsmithbot.telegram.client import TelegramBotClientFactory
 from qmrsmithbot.telegram.inline_runtime import InlineBotError
 
@@ -77,17 +78,14 @@ async def button_page(session, project, welcome, parent_id=None, offset=0):
     query = select(FactoryButtonRecord).where(FactoryButtonRecord.project_id == project.id,
         FactoryButtonRecord.parent_id == parent_id, FactoryButtonRecord.published.is_not(None))
     # SQL NULL is used when unpublishing; JSON null is excluded as well.
-    query = query.order_by(FactoryButtonRecord.created_at, FactoryButtonRecord.id).offset(offset).limit(9)
+    query = query.order_by(order_expression('published'), FactoryButtonRecord.id).offset(offset).limit(9)
     items = (await session.scalars(query)).all()
     rows = []
     for item in items[:8]:
         content = item.published
         if not content or (content['kind'] == 'file' and not content.get('file_id')):
             continue
-        if content['kind'] == 'url':
-            rows.append([{'text': content['title'], 'url': content['url']}])
-        else:
-            rows.append([button(content['title'], 'b:'+item.id.hex)])
+        append_visitor_button(rows, content, item.id)
     root = parent_id.hex if parent_id else 'root'
     pager = []
     if offset:

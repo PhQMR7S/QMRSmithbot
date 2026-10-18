@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from qmrsmithbot.auth.models import Permission
 from qmrsmithbot.db.factory_models import FactoryButtonRecord
+from qmrsmithbot.factory.button_design import move_button, order_expression
 from qmrsmithbot.factory.menu import MenuState
 from qmrsmithbot.telegram.inline_runtime import InlineBotError, compile_text_program
 
@@ -51,7 +52,7 @@ class ButtonEditor:
             raise ValueError()
         items = (await self.session.scalars(select(FactoryButtonRecord).where(
             FactoryButtonRecord.project_id == project_id, FactoryButtonRecord.parent_id == parent,
-            FactoryButtonRecord.deleted.is_(False)).order_by(FactoryButtonRecord.created_at, FactoryButtonRecord.id).offset(offset).limit(7))).all()
+            FactoryButtonRecord.deleted.is_(False)).order_by(order_expression(), FactoryButtonRecord.id).offset(offset).limit(7))).all()
         rows = []
         for item in items[:6]:
             prefix = {'section': '🗂', 'text': '💬', 'url': '🔗', 'file': '📎'}[item.draft['kind']]
@@ -95,14 +96,55 @@ class ButtonEditor:
             rows.append([self.button('✏️ تعديل المحتوى', '✏️ Edit content', 'bedit:'+raw)])
         rows.append([self.button('✏️ اسم الزر', '✏️ Button label', 'btitle:'+raw),
                      self.button('🗑 حذف', '🗑 Delete', 'bdel:'+raw)])
+        rows.append([self.button('التصميم والترتيب', 'Design & order', 'bdesign:'+raw)])
         rows.append(self.back(item.project_id, item.parent_id))
         body = data.get('text') or data.get('url') or self.tr('ملف جاهز' if data.get('file_id') else 'انشر البوت ثم افتح رابط الرفع. بعد استلام الملف انشر التعديلات مرة ثانية.',
             'File ready' if data.get('file_id') else 'Publish the bot, open its upload link, then publish again after receiving the file.')
         return self.menu.response('🗂 '+data['title']+'\n\n'+body[:3000], rows)
 
+    async def design(self, item):
+        style = item.draft.get('style') or 'default'
+        options = [('default','تلقائي','Default'),('primary','أزرق','Blue'),
+                   ('success','أخضر','Green'),('danger','أحمر','Red')]
+        rows = [[self.button(('✓ ' if style==value else '')+ar,
+                             ('✓ ' if style==value else '')+en, f'bd:{item.id.hex}:{value}')
+                 for value, ar, en in options[:2]],
+                [self.button(('✓ ' if style==value else '')+ar,
+                             ('✓ ' if style==value else '')+en, f'bd:{item.id.hex}:{value}')
+                 for value, ar, en in options[2:]],
+                [self.button('صف مستقل','Separate row',f'bd:{item.id.hex}:separate'),
+                 self.button('بجانب السابق','Beside previous',f'bd:{item.id.hex}:join')],
+                [self.button('تحريك للأعلى','Move up',f'bd:{item.id.hex}:up'),
+                 self.button('تحريك للأسفل','Move down',f'bd:{item.id.hex}:down')],
+                [self.button('تفاصيل الزر','Button details','item:'+item.id.hex)], self.back(item.project_id,item.parent_id)]
+        body = self.tr('تصميم زر · ','Button design · ')+item.draft['title']
+        body += self.tr('\n\nالتغييرات مسودة حتى النشر. التجميع بحد أقصى 3 أزرار في الصف، ويبدأ كل قسم وصفحة بصف جديد. ألوان الأزرار تحتاج نسخة تيليجرام تدعمها.',
+                        '\n\nChanges stay in draft until published. Up to 3 buttons share a row; each folder/page starts a fresh row. Colors require a supporting Telegram client.')
+        body += self.tr('\nالصف: بجانب السابق' if item.draft.get('join_previous') else '\nالصف: مستقل',
+                        '\nRow: beside previous' if item.draft.get('join_previous') else '\nRow: separate')
+        return self.menu.response(body,rows)
+
     async def handle(self, *, text=None, callback=None):
         parts = callback.split(':') if callback else []
         state = await self.manager.store.state()
+        if parts and parts[0] in ('bdesign','bd'):
+            if len(parts) != (3 if parts[0]=='bd' else 2):
+                raise ValueError()
+            item = await self.item(UUID(parts[1]), write=True)
+            if parts[0]=='bd':
+                option=parts[2]
+                if option in ('up','down'):
+                    await move_button(self.session,item,option)
+                elif option in ('default','primary','success','danger'):
+                    item.draft={**item.draft,'style':None if option=='default' else option}
+                elif option in ('join','separate'):
+                    item.draft={**item.draft,'join_previous':option=='join'}
+                else:
+                    raise ValueError()
+                await self.session.flush()
+                await self.manager.store.audit('factory.button.design_saved',item.project_id,
+                    self.manager.store.user.id,self.manager.store.tenant_id)
+            return await self.design(item)
         if parts and parts[0] in ('buttons', 'folder', 'item', 'bnew', 'bl', 'bedit', 'btitle', 'bdel'):
             action = parts[0]
             if len(parts) != (4 if action in ('bnew','bl') else 2):

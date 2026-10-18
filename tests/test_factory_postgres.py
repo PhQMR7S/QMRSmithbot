@@ -855,3 +855,44 @@ async def test_starter_creation_is_atomic_deduplicated_and_editable(factory_data
         items=(await session.scalars(select(FactoryButtonRecord).where(FactoryButtonRecord.project_id==other))).all()
         assert len(items)==len(get_starter('knowledge').items)
         assert all(item.id != child and item.draft['title'] != 'درس مخصص' for item in items)
+
+
+@pytest.mark.asyncio
+async def test_button_design_order_and_rows_do_not_change_live_until_publish(factory_database,monkeypatch):
+    from qmrsmithbot.db.factory_models import FactoryButtonRecord
+    from qmrsmithbot.factory.button_design import order_expression
+
+    project_id,_,launch,deliver=await create_product_bot(factory_database,monkeypatch,'buttons')
+    processor,sessions,update,_,_=factory_database
+    for title in ('First','Second'):
+        await processor.process(update(callback=f'bnew:{project_id.hex}:r:text'))
+        await processor.process(update(text=title))
+        await processor.process(update(text='Body '+title))
+    async with sessions() as session:
+        items=(await session.scalars(select(FactoryButtonRecord).where(
+            FactoryButtonRecord.project_id==project_id).order_by(order_expression()))).all()
+        first,second=[item.id for item in items]
+    await launch()
+    before,_=await deliver(text='/start')
+    assert [row[0]['text'] for row in before['reply_markup']['inline_keyboard']][:2]==['First','Second']
+    await processor.process(update(callback=f'bd:{second.hex}:up'))
+    await processor.process(update(callback=f'bd:{second.hex}:success'))
+    await processor.process(update(callback=f'bd:{first.hex}:join'))
+    async with sessions() as session:
+        items=(await session.scalars(select(FactoryButtonRecord).where(
+            FactoryButtonRecord.project_id==project_id).order_by(order_expression()))).all()
+        assert [item.id for item in items]==[second,first]
+        assert items[0].draft['style']=='success'
+        assert 'style' not in items[0].published
+    unchanged,_=await deliver(text='/start')
+    assert [row[0]['text'] for row in unchanged['reply_markup']['inline_keyboard']][:2]==['First','Second']
+    await launch()
+    after,_=await deliver(text='/start')
+    row=after['reply_markup']['inline_keyboard'][0]
+    assert [button['text'] for button in row]==['Second','First']
+    assert row[0]['style']=='success'
+    await processor.process(update(callback=f'bd:{second.hex}:up'))
+    async with sessions() as session:
+        items=(await session.scalars(select(FactoryButtonRecord).where(
+            FactoryButtonRecord.project_id==project_id).order_by(order_expression()))).all()
+        assert [item.id for item in items]==[second,first]

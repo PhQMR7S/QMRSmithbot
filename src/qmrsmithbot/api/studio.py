@@ -17,6 +17,7 @@ from qmrsmithbot.db.factory_models import BotFormSubmissionRecord, FactoryButton
 from qmrsmithbot.db.models import User
 from qmrsmithbot.db.session import get_session
 from qmrsmithbot.factory.bot_management import BotManagement
+from qmrsmithbot.factory.button_design import order_expression
 from qmrsmithbot.factory.button_editor import ButtonEditor
 from qmrsmithbot.factory.store import SQLFactoryStore
 from qmrsmithbot.forms.schema import Form
@@ -44,6 +45,8 @@ class ButtonDraft(BaseModel):
     title: str = Field(min_length=1, max_length=64)
     text: str | None = Field(default=None, max_length=3000)
     url: str | None = Field(default=None, max_length=3000)
+    style: Literal['primary', 'success', 'danger'] | None = None
+    join_previous: bool | None = None
     revision: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
 
     def content(self):
@@ -59,8 +62,12 @@ class ButtonDraft(BaseModel):
                 data[field] = value if field == 'text' else value.strip()
             elif value is not None:
                 raise ValueError()
+        if 'style' in self.model_fields_set:
+            data['style'] = self.style
+        if self.join_previous is not None:
+            data['join_previous'] = self.join_previous
         for value in data.values():
-            if re.search(r'\b[0-9]{5,16}:[A-Za-z0-9_-]{20,}\b', value):
+            if isinstance(value,str) and re.search(r'\b[0-9]{5,16}:[A-Za-z0-9_-]{20,}\b', value):
                 raise ValueError()
         return data
 
@@ -76,7 +83,7 @@ def revision(item):
 
 
 def button_view(item):
-    data = {key: item.draft[key] for key in ('kind', 'title', 'text', 'url') if key in item.draft}
+    data = {key: item.draft[key] for key in ('kind', 'title', 'text', 'url', 'style', 'join_previous') if key in item.draft}
     return {'id': str(item.id), 'parent_id': str(item.parent_id) if item.parent_id else None,
         **data, 'revision': revision(item), 'published': item.published is not None,
         'pending': item.draft != item.published or item.deleted,
@@ -181,8 +188,7 @@ class Studio:
             raise HTTPException(422, 'Parent must be a section')
         items = (await self.session.scalars(select(FactoryButtonRecord).where(
             FactoryButtonRecord.project_id == project_id, FactoryButtonRecord.parent_id == parent_id,
-            FactoryButtonRecord.deleted.is_(False)).order_by(FactoryButtonRecord.created_at,
-                FactoryButtonRecord.id).offset(offset).limit(9))).all()
+            FactoryButtonRecord.deleted.is_(False)).order_by(order_expression(), FactoryButtonRecord.id).offset(offset).limit(9))).all()
         return {'items':[button_view(item) for item in items[:8]], 'has_more':len(items)>8,
                 'folder':button_view(folder) if folder is not None else None}
 

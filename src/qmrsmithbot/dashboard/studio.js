@@ -553,7 +553,13 @@ export class Studio {
           },
           item.kind,
         );
-        this.previewButtons.append(b);
+        if (["primary", "success", "danger"].includes(item.style)) b.classList.add("telegram-" + item.style);
+        let previewRow = this.previewButtons.lastElementChild;
+        if (!item.join_previous || !previewRow || !previewRow.classList.contains("telegram-button-row") || previewRow.children.length >= 3) {
+          previewRow = node("div", undefined, "telegram-button-row");
+          this.previewButtons.append(previewRow);
+        }
+        previewRow.append(b);
       }
       this.pager.replaceChildren();
       for (const [key, offset, disabled] of [
@@ -627,6 +633,26 @@ export class Studio {
     title.value = item.title;
     titleLabel.append(title);
     form.append(titleLabel);
+    const ar = document.documentElement.lang === "ar";
+    const styleLabel = node("label", ar ? "لون الزر في تيليجرام" : "Telegram button color");
+    const color = node("select");
+    for (const [value, label] of [["", ar ? "تلقائي" : "Default"], ["primary", ar ? "أزرق" : "Blue"], ["success", ar ? "أخضر" : "Green"], ["danger", ar ? "أحمر" : "Red"]]) {
+      const option = node("option", label);
+      option.value = value;
+      color.append(option);
+    }
+    color.value = item.style || "";
+    styleLabel.append(color);
+    const rowLabel = node("label", ar ? "موضع الزر في الصف" : "Button row position");
+    const rowMode = node("select");
+    for (const [value, label] of [["separate", ar ? "صف مستقل" : "Separate row"], ["join", ar ? "بجانب السابق (حتى 3 أزرار)" : "Beside previous (up to 3 buttons)"]]) {
+      const option = node("option", label);
+      option.value = value;
+      rowMode.append(option);
+    }
+    rowMode.value = item.join_previous ? "join" : "separate";
+    rowLabel.append(rowMode);
+    form.append(styleLabel, rowLabel, node("p", ar ? "اللون والتخطيط مسودة حتى النشر. ترتيب الأزرار متاح من لوحة بوتك داخل المصنع، من تفاصيل الزر ← التصميم والترتيب." : "Color and layout stay in draft until published. Reorder buttons in the native factory: button details → Design & order.", "muted"));
     let body = null;
     if (["text", "url"].includes(item.kind)) {
       const label = node(
@@ -662,6 +688,8 @@ export class Studio {
     form.append(state);
     form.addEventListener("input", () => {
       this.dirty =
+        color.value !== (item.style || "") ||
+        (rowMode.value === "join") !== Boolean(item.join_previous) ||
         title.value !== item.title ||
         (body && body.value !== (item[item.kind] || ""));
       state.textContent = this.dirty ? this.t("local") : "";
@@ -705,6 +733,8 @@ export class Studio {
           parent_id: item.parent_id,
           kind: item.kind,
           title: title.value,
+          style: color.value || null,
+          join_previous: rowMode.value === "join",
         };
         if (body) payload[item.kind] = body.value;
         if (item.revision) payload.revision = item.revision;
