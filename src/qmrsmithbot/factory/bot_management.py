@@ -1,7 +1,9 @@
 """Tenant-scoped bot management; raw credentials never enter conversation state."""
+import asyncio
 import re
 from copy import deepcopy
 from datetime import UTC, datetime
+from time import perf_counter
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
@@ -49,6 +51,35 @@ class BotManagement:
         if project is None:
             raise InlineBotError('missing')
         return project
+
+    async def diagnose(self, project_id, language):
+        """Read Telegram state without changing delivery or exposing credentials."""
+        from qmrsmithbot.factory.diagnostics import describe_connection
+        project = await self.project(project_id, Permission.PROJECT_WRITE)
+        credential = await self.session.get(BotCredentialRecord, project_id)
+        if credential is None or project.telegram_bot_id is None:
+            raise InlineBotError('unbound')
+        record = await self.session.get(TelegramInlineBotRecord, project_id)
+        bot = make_bot(decrypt_bot_token(credential.token_ciphertext))
+        started = perf_counter()
+        try:
+            async with asyncio.timeout(10):
+                me = await bot.get_me()
+                info = await bot.get_webhook_info()
+        except (TelegramAPIError, OSError, TimeoutError, RuntimeError):
+            return ('تعذر إكمال الفحص. تحقق من التوكن ثم أعد المحاولة. لم تتغير إعدادات الاتصال.'
+                    if language == 'ar' else
+                    'Check unavailable. Verify the token and retry. Connection settings were not changed.')
+        finally:
+            await bot.session.close()
+        expected = settings.telegram_ingress_base_url.rstrip('/') + '/bots/' + str(project_id)
+        return describe_connection(
+            language=language, identity_matches=me.id == project.telegram_bot_id,
+            webhook_matches=bool(settings.telegram_ingress_base_url) and info.url == expected,
+            has_webhook=bool(info.url), pending=info.pending_update_count,
+            last_error=info.last_error_date, elapsed_ms=round((perf_counter()-started)*1000),
+            running=project.status == 'running' and bool(record and record.enabled),
+        )
 
     async def latest(self, project_id):
         version = await self.session.scalar(select(WorkflowVersionRecord).where(
@@ -237,10 +268,13 @@ class BotManagement:
                     from qmrsmithbot.factory.managed_bots import confirm_binding
                     return await confirm_binding(self, menu, callback.split(':', 1)[1])
                 action, raw = callback.split(':', 1)
-                if action in ('project', 'managed', 'bind', 'preview', 'rename', 'welcome', 'rules', 'rulesmsg', 'rulescmd', 'launchask', 'connection', 'botsettings', 'simulate', 'contactsetup'):
+                if action in ('project', 'managed', 'bind', 'preview', 'rename', 'welcome', 'rules', 'rulesmsg', 'rulescmd', 'launchask', 'connection', 'botsettings', 'simulate', 'contactsetup', 'health'):
                     project_id = UUID(raw)
                     project = await self.project(project_id)
                     program = compile_text_program((await self.latest(project_id)).definition)
+                    if action == 'health':
+                        report = await self.diagnose(project_id, menu.lang)
+                        return menu.response(report, [[button('إعادة الفحص', 'Check again', 'health:' + raw)], back(project_id)])
                     if action == 'managed':
                         from qmrsmithbot.factory.managed_bots import prepare_creation
                         return await prepare_creation(self, menu, project)
@@ -290,6 +324,7 @@ class BotManagement:
                             rows.insert(0, [button('✨ إنشاء داخل تيليجرام', '✨ Create in Telegram', 'managed:' + raw)])
                         if project.telegram_username:
                             rows.append([{'text': tr('↗ فتح البوت', '↗ Open bot'), 'url': 'https://t.me/' + project.telegram_username}])
+                        rows.append([button('فحص الاتصال والأداء', 'Connection diagnostics', 'health:' + raw)])
                         rows.append(back(project_id))
                         return menu.response(tr('🔐 اتصال البوت\n\n', '🔐 Bot connection\n\n') + connected + tr('\n\nالتوكن مشفّر ولا يُعرض هنا. تحديثه يقبل نفس هوية البوت فقط.', '\n\nThe token is encrypted and never shown here. Updates must belong to the same bot.'), rows)
                     if action == 'botsettings':

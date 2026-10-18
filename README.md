@@ -52,3 +52,7 @@ See `docs/BUTTONS_AND_CONTACT.md` and `docs/INLINE_TEXT_RUNTIME.md` for runtime 
 Read `docs/DASHBOARD.md`, `docs/TEMPLATES.md`, `docs/PROJECT_MANAGEMENT.md`, `docs/TELEGRAM_FACTORY.md` and `docs/VERCEL_DEPLOYMENT.md` for functionality, prerequisites and validation limits.
 
 The form template supports text, numeric and choice questions with forward branches, version-frozen visitor sessions and an owner-only submissions inbox. See [Form builder](docs/FORM_BUILDER.md).
+
+### Connection diagnostics
+
+The native bot panel's Connection & token section includes a read-only diagnostic check for users with project-write permission. It verifies the token identity, checks whether Telegram's webhook matches this factory, and displays pending updates, historical delivery-error time, local runtime status and the elapsed time of two Telegram API requests. This is not an end-to-end visitor latency measurement. Raw Telegram errors, tokens and webhook URLs are not displayed. The check never resets the webhook or drops pending updates; API failures preserve connection settings.
